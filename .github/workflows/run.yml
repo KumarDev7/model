@@ -1,6 +1,6 @@
 name: Build
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       username:
         description: 'A username passed from the caller workflow'
