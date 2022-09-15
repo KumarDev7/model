@@ -1,13 +1,20 @@
-name: Build
-on:
-  workflow_dispatch:
-    inputs:
-      data:
-        description: 'Pass the file'
-        required: true
+name: Run
+on: [push]
+
 jobs:
-  print-username:
-    runs-on: ubuntu-latest
+  build:
+    name: Build
+    runs-on: ubuntu-22.04
     steps:
-      - name: Print the file info
-        run: file ${{ inputs.data }}
+      - name: Start SSH via ngrok
+        uses: rdp-studio/ssh2actions@main
+        with:
+          mode: ngrok
+        env:
+          NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
+          NGROK_REGION: us
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  
