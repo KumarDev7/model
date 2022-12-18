@@ -1,4 +1,4 @@
-name: Run
+(name: Run
 on: [push]
 
 jobs:
@@ -6,15 +6,9 @@ jobs:
     name: Build
     runs-on: ubuntu-22.04
     steps:
-      - name: Start SSH via ngrok
-        uses: rdp-studio/ssh2actions@main
-        with:
-          mode: ngrok
-        env:
-          NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
-          NGROK_REGION: us
-          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: NDK
+        run: echo $ANDROID_NDK_HOME
+      - name: NDK
+        run: echo $ANDROID_NDK
 
   
