@@ -17,5 +17,5 @@ jobs:
       - name: build
         run: |
            rustup target add aarch64-linux-android
-           cargo rustc --target aarch64-linux-android
+           cd audio && cargo rustc --target aarch64-linux-android
  
