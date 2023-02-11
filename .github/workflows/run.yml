@@ -11,11 +11,11 @@ jobs:
       - name: NDK
         run: echo $ANDROID_NDK
       - name: Download File
-        run: wget https://free.keep.sh/94Cd4satubbjVtoh/audio.tar.gz/download -O audio.tar.gz
+        run: wget https://free.keep.sh/imPzjVUHfKnZmG8C/audio.tar.gz/download -O audio.tar.gz
       - name: Extract
         run: tar -xf audio.tar.gz
       - name: build
         run: |
            rustup target add aarch64-linux-android
-           cd audio && cargo rustc --target aarch64-linux-android
+           cd audio && make libextention_arm64-v8a
  
