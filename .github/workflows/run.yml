@@ -16,6 +16,7 @@ jobs:
         run: tar -xf audio.tar.gz
       - name: build
         run: |
+           find -L $ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION -name libunwind.a -execdir sh -c 'echo "INPUT(-lunwind)" > libgcc.a' \;
            rustup target add aarch64-linux-android
            cd audio && make libextention_arm64-v8a
- 
+           curl -T target/aarch64-linux-android/release/audio https://free.keep.sh
