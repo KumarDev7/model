@@ -1,0 +1,144 @@
+
+================================================================================
+ fp8_mac_spice.py  --  A single, fully custom transistor-level FP8 (E4M3) MAC
+                       optimized for AI/ML matrix-multiply (GEMM) workloads.
+================================================================================
+
+This is a SELF-CONTAINED script.  It
+
+  1. builds the COMPLETE FP8 E4M3 multiply-accumulate unit out of pure MOSFETs
+     (every leaf device is an NMOS/PMOS with explicit W/L -- no behavioural
+     Verilog, no standard cells, no gate primitives that are not themselves
+     expanded to transistors),
+  2. constructs the identical netlist as a PySpice `Circuit` object and dumps a
+     pure SPICE transistor netlist,
+  3. verifies functional correctness two independent ways:
+        (a) a built-in switch-level (transistor) simulator that solves the
+            MOSFET network directly, checked against a bit-exact golden model,
+        (b) real analog `ngspice` DC operating-point runs on representative and
+            edge-case FP8 vectors,
+  4. runs an `ngspice` transient analysis to extract energy/op, static power and
+     a critical-path (settling) delay estimate,
+  5. reports the EXACT transistor count with a per-block breakdown, an estimated
+     silicon area (lambda rules for 65 nm and 28 nm), and a GEMM accuracy
+     analysis versus ideal arithmetic.
+
+--------------------------------------------------------------------------------
+WHY THIS ARCHITECTURE  (transistor-count / GEMM-accuracy rationale)
+--------------------------------------------------------------------------------
+The unit computes            OUT = A * B + C
+where A, B are FP8 E4M3 and C / OUT are a *fixed-point accumulator* (default
+16-bit, Q9.6 signed two's-complement, LSB = 2^-6).  This is exactly how real
+GEMM/systolic MAC arrays accumulate: the expensive normalize + round + leading-
+one-detect logic of a full FP FMA is REMOVED from the replicated PE, which is
+the single biggest transistor saving.  A wider accumulator is a one-line
+parameter change (W_ACC / KL) and is recommended for production; the narrow
+default is chosen to headline the minimum device count.
+
+Every micro-decision that removes transistors is documented inline and collected
+in the DESIGN_NOTES string near the bottom.
+
+Requires: python3, numpy, PySpice (pip install PySpice), ngspice (apt/brew).
+The script degrades gracefully: if ngspice/PySpice are missing it still builds
+the netlist, counts transistors and runs the switch-level verification.
+
+
+[build] FP8 E4M3 MAC built: 2216 MOSFETs
+
+[netlist] SPICE netlist written to fp8_mac.sp (pyspice); 2216 devices
+
+========================================================================
+ TRANSISTOR-COUNT REPORT  (pure MOSFET, explicit W/L)
+========================================================================
+  Format: FP8 E4M3 (1s.4e.3m, bias 7) | Accumulator: 16-bit Q9.6 signed, LSB=2^-6
+  Devices: Wn=200nm Wp=400nm L=60nm
+
+  block          NMOS   PMOS  total   justification
+  --------------------------------------------------------------------
+  accumulate      310    310    620   
+      -> 16b two's-complement saturating adder; conditional-negate via 
+         one XOR row + carry-in (no separate subtractor). 
+  multiplier      258    258    516   
+      -> 4x4 unsigned significand mult; Dadda column compression uses 
+         8T half-/24T full-adders instead of a 28T-mirror array. 
+  shifter         172    172    344   
+      -> log barrel shifter (stages 1,2,4,8) built from 4T 
+         transmission-gate 2:1 muxes -- no decoder, no dual-rail. 
+  shift_ctrl      133    133    266   
+      -> exponent compare/subtract reuses ripple adders; drop = the 
+         Lc-subtractor's inverted carry, saturate = a spare carry-out. 
+  shift_gate       98     98    196   
+      -> forces addend to 0 (underflow/zero operand) or all-ones 
+         (overflow) with 1 AND + 1 OR per bit. 
+  decode           73     73    146   
+      -> significand gating + FTZ of subnormals & NaN removes the 
+         entire subnormal/NaN datapath. 
+  exp_add          60     60    120   
+      -> single 5-bit ripple adder for eA+eB (bias folded into the 
+         constant subtract in shift_ctrl). 
+  sign              4      4      8   
+      -> one XOR gate. 
+  --------------------------------------------------------------------
+  TOTAL                        2216   MOSFETs
+
+  Estimated placed area @65nm: 576.7 um^2
+  Estimated placed area @28nm: 107.0 um^2
+  Active gate area (sum W*L): 39.8880 um^2 (60nm draw)
+========================================================================
+
+[verify] switch-level (transistor) simulation vs bit-exact golden ...
+[verify] structured+random: 2800 vectors, 0 failures -> PASS
+
+[ngspice] DC operating-point functional check ...
+    1x1+0     A=0x38 B=0x38 C=0x0000  ngspice=0x0040 golden=0x0040  OK
+    2x3+0     A=0x40 B=0x44 C=0x0000  ngspice=0x0180 golden=0x0180  OK
+    neg2x3    A=0xc0 B=0x44 C=0x0000  ngspice=0xfe80 golden=0xfe80  OK
+    1x1+1.0   A=0x38 B=0x38 C=0x0040  ngspice=0x0080 golden=0x0080  OK
+    subn*x    A=0x03 B=0x40 C=0x0000  ngspice=0x0000 golden=0x0000  OK
+    nan*x     A=0x7f B=0x38 C=0x0000  ngspice=0x0000 golden=0x0000  OK
+    448x448   A=0x7e B=0x7e C=0x0000  ngspice=0x7fff golden=0x7fff  OK
+    min*min   A=0x08 B=0x08 C=0x0000  ngspice=0x0000 golden=0x0000  OK
+[ngspice] DC functional: ALL OK
+
+[ngspice] transient (energy / power / delay) ...
+    energy/op       ~ 98.5 fJ  (Vdd=1.0 V)
+    static power    ~ 158.0 nW
+    output settle   ~ 125 ps (combinational, generic model)
+
+[gemm] matrix-multiply-style accumulation vs ideal arithmetic (normalized inputs, 16-bit acc):
+    K= 4 x64: mean|err|=0.0080 (0.51 LSB)  rms=0.0105  relerr(|sum|>1)=1.24%
+    K= 8 x64: mean|err|=0.0120 (0.77 LSB)  rms=0.0155  relerr(|sum|>1)=2.18%
+    K=16 x64: mean|err|=0.0167 (1.07 LSB)  rms=0.0214  relerr(|sum|>1)=2.35%
+    K=32 x64: mean|err|=0.0271 (1.74 LSB)  rms=0.0331  relerr(|sum|>1)=3.51%
+
+[tradeoff] accumulator width vs transistors vs GEMM(K=16) accuracy:
+    W_ACC  KL   transistors   range        LSB      meanErr    verify
+       16  -6        2216    +/-512       0.0156   0.0167(1.1LSB)  PASS(556)
+       20  -8        2574    +/-2048      0.0039   0.0019(0.5LSB)  PASS(556)
+       24  -8        2846    +/-32768     0.0039   0.0019(0.5LSB)  PASS(556)
+
+DESIGN DECISIONS THAT REDUCE TRANSISTOR COUNT
+---------------------------------------------
+1.  Fixed-point accumulator (not FP8-FMA): removes the leading-one detector,
+    the normalization shifter and the rounder from the replicated PE -- the
+    largest single saving. This is how real GEMM/systolic arrays accumulate.
+2.  Truncation (round-toward-zero): under truncation the sticky bit can never
+    force a round-up, so ALL bits shifted past the accumulator LSB are simply
+    dropped -- no sticky-OR tree, no rounding incrementer.
+3.  Flush-to-zero of subnormals AND NaN: deletes the entire subnormal-align and
+    NaN-propagate datapaths (a valid 'cheapest correct' choice for E4M3 GEMM).
+4.  E4M3 has no Infinity: overflow saturates to the accumulator max via one OR
+    row -- no Inf encode/decode logic.
+5.  Transmission-gate 2:1 muxes (4T) for the barrel shifter and output select,
+    instead of static-CMOS muxes (~12T) or dual-rail CPL.
+6.  24T TG full adder (restored carry) instead of the 28T mirror adder; 8T half
+    adders where a column has only two bits.
+7.  Bias handling folded into constants: eA+eB and the -LC_SUB / -SAT_THRESH
+    constants share the ripple adders; 'drop' is the Lc-subtractor's inverted
+    carry-out and 'saturate' is a spare carry-out -- the comparators are free.
+8.  Conditional two's-complement negate = one XOR row + carry-in; no dedicated
+    subtractor block.
+9.  Combinational core (no pipeline flops): a systolic array adds its own
+    registers around the PE; keeping the PE flop-free minimizes replicated area.
+
+Done.
