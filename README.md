@@ -15,10 +15,12 @@ transistor netlist, and simulated in **ngspice**.
 Result = A · B + C          A, B : FP8 E4M3        C, Result : fixed-point accumulator
 ```
 
-* **Default (minimum-area) configuration: 2216 MOSFETs.**
+* **Default (minimum-area) configuration: 1454 MOSFETs** (down from 2216 after an
+  aggressive constant-folding / hardware-sharing optimization pass — see §9).
 * Verified two independent ways: a built-in **switch-level (transistor) simulator**
-  against a bit-exact golden model, **and** real **ngspice** DC operating-point +
-  transient analog simulation.
+  against a bit-exact golden model, **and** real analog simulation driven **by
+  PySpice's own ngspice binding** (DC operating-point) plus an ngspice transient
+  for power/delay.
 
 ---
 
@@ -68,9 +70,9 @@ element (PE). Width/precision are parameters (`set_accumulator(W_ACC, KL)`):
 
 | config | width | range | LSB | mean GEMM error (K=16) | transistors |
 |--------|-------|-------|-----|------------------------|-------------|
-| **default (min-area)** | 16-bit Q9.6 | ±512 | 2⁻⁶ ≈ 0.0156 | ≈ 1.1 LSB | **2216** |
-| balanced | 20-bit | ±2048 | 2⁻⁸ ≈ 0.0039 | ≈ 0.5 LSB | 2574 |
-| full-range | 24-bit | ±32768 | 2⁻⁸ | ≈ 0.5 LSB | 2846 |
+| **default (min-area)** | 16-bit Q9.6 | ±512 | 2⁻⁶ ≈ 0.0156 | ≈ 1.1 LSB | **1454** |
+| balanced | 20-bit | ±2048 | 2⁻⁸ ≈ 0.0039 | ≈ 0.5 LSB | 1720 |
+| full-range | 24-bit | ±32768 | 2⁻⁸ | ≈ 0.5 LSB | 1906 |
 
 (The exact numbers are reproduced by the `[tradeoff]` table the script prints.)
 
@@ -101,21 +103,21 @@ comparators are nearly free.
 
 ## 4. Transistor-count report (default 16-bit config)
 
-| block | NMOS | PMOS | total | what it is / why it's small |
-|-------|-----:|-----:|------:|-----------------------------|
-| accumulate | 310 | 310 | **620** | 16-bit two's-complement **saturating** adder; conditional negate = 1 XOR row + carry-in (no separate subtractor) |
-| multiplier | 258 | 258 | **516** | 4×4 unsigned significand multiply; Dadda column compression with 8T half-/24T full-adders (vs 28T mirror array) |
-| shifter | 172 | 172 | **344** | logarithmic barrel shifter (stages 1,2,4,8) from **4T transmission-gate** 2:1 muxes — no decoder, no dual-rail |
-| shift_ctrl | 133 | 133 | **266** | exponent compare/subtract; `drop` and `saturate` reuse adder carry-outs |
-| shift_gate | 98 | 98 | **196** | forces addend to 0 (underflow/zero operand) or all-ones (overflow): 1 AND + 1 OR per bit |
-| decode | 73 | 73 | **146** | significand gating + FTZ of subnormals & NaN (removes those datapaths) |
-| exp_add | 60 | 60 | **120** | single 5-bit ripple adder (bias folded into a constant subtract) |
-| sign | 4 | 4 | **8** | one XOR gate |
-| **TOTAL** | | | **2216** | |
+| block | NMOS | PMOS | total | before | what it is / why it's small |
+|-------|-----:|-----:|------:|------:|-----------------------------|
+| accumulate | 271 | 271 | **542** | 620 | 16-bit two's-complement **saturating** adder (20T FAs); negate = 1 XOR row + carry-in; overflow = XOR of top two carries |
+| multiplier | 149 | 149 | **298** | 516 | implicit leading-1 is a **constant** → the 4×4 folds to a 3×3 (9 ANDs); Dadda compression |
+| shifter | 104 | 104 | **208** | 344 | **pruned** log barrel shifter (4T TG muxes): only occupied bits + last-stage read window are built |
+| shift_gate | 77 | 77 | **154** | 196 | gates the 8-bit product to 0 (underflow/zero) at the shifter input, ORs saturation into M |
+| decode | 53 | 53 | **106** | 146 | FTZ subnormals & NaN + **constant** implicit-1 → no significand-gating gates |
+| exp_add | 37 | 37 | **74** | 120 | single 5-bit ripple adder (top bits fold away) |
+| shift_ctrl | 32 | 32 | **64** | 266 | `eSum ± constant` folds half its full-adders to half-adders; `drop`/`sat` are carry-outs |
+| sign | 4 | 4 | **8** | 8 | one XOR gate |
+| **TOTAL** | | | **1454** | 2216 | **−34 %** |
 
-Estimated placed area (λ design rules, dense custom): **≈ 577 µm² @ 65 nm**,
-**≈ 107 µm² @ 28 nm**. Active gate area Σ(W·L) ≈ 39.9 µm² (60 nm draw). Supply
-0.8–1.0 V (default 1.0 V).
+Estimated placed area (λ design rules, dense custom): **≈ 380 µm² @ 65 nm**,
+**≈ 70 µm² @ 28 nm**. Supply 0.8–1.0 V (default 1.0 V). (Exact figures are
+printed by the script.)
 
 ### Primitive cell library (each fully expanded to transistors)
 
@@ -126,15 +128,19 @@ Estimated placed area (λ design rules, dense custom): **≈ 577 µm² @ 65 nm**
 | NAND3 / NOR4 | 6 / 8 | static CMOS |
 | transmission gate | 2 | N+P pass pair (full-swing) |
 | 2:1 MUX | 4 (+shared inv) | transmission-gate |
-| XOR2 | 4 (+shared inv) | transmission-gate |
+| XOR2 / XNOR2 | 4 (+shared inv) | transmission-gate |
 | half adder | ~10 | TG XOR + AND |
-| **full adder** | **24** | TG XOR/XNOR sum + TG-mux carry, **restored** carry |
+| **full adder** | **20** | TG-XOR sum + TG-mux carry |
 
-The full adder is **24T** (restored carry keeps drive across a ripple chain),
-chosen over the 28T mirror adder for area and over unreliable 10T pass-only
-designs for correctness. Transmission gates use parallel N+P so every node
-swings rail-to-rail — no threshold-drop, which is why the analog ngspice runs
-resolve to correct logic levels.
+**Every cell constant-folds.** An input tied to VDD/GND collapses the cell to a
+wire / constant / inverter, so no transistor is ever spent driving a rail. That
+single rule is what removes the "idle" transistors: constant operands (the
+implicit leading 1s, the bias/threshold constants, zero-padding) cost nothing,
+which is why the 4×4 multiplier is really a 3×3 and `shift_ctrl` collapsed from
+266→64. The full adder is **20T** (no per-bit carry restore); a restoring buffer
+is inserted only every 4th bit of a long ripple. Transmission gates use parallel
+N+P so every node swings rail-to-rail — no threshold drop, which is why the
+analog runs resolve to correct logic levels.
 
 ---
 
@@ -150,12 +156,12 @@ against the bit-exact `mac_hw()` golden model over structured corner vectors
 random vectors, and (optionally) the **exhaustive** 65 536 `A·B` space.
 Result: **0 failures**.
 
-**(b) Real analog ngspice.** The identical netlist is built as a PySpice
-`Circuit` and driven through `ngspice -b` (PySpice 1.5's shared-lib bridge is
-incompatible with ngspice 42, so the emitted deck is run through the binary).
-A **DC operating-point** of the full ~2200-transistor network is solved per
-vector and thresholded to logic; edge cases (subnormal→FTZ, NaN→FTZ,
-448×448→saturate, min×min→underflow) all match the golden model.
+**(b) Real analog simulation, driven by PySpice.** The identical netlist is built
+as a PySpice `Circuit` and simulated through **PySpice's own `NgSpiceShared`
+binding** (see §5.1 below on the ngspice-42 compatibility). A **DC operating-point**
+of the full 1454-transistor network is solved per vector and thresholded to logic;
+edge cases (subnormal→FTZ, NaN→FTZ, 448×448→saturate, min×min→underflow) all match
+the golden model: `DC functional: ALL OK`.
 
 **(c) Transient — power / delay.** An `ngspice` `.tran` toggles a full input
 vector; the supply current is integrated for **energy/op**, the settled current
@@ -163,8 +169,23 @@ gives **static power**, and the last output crossing gives a combinational
 **settling delay** estimate.
 
 Representative measured figures (generic 1.0 V model, see `VERIFICATION.txt`):
-**energy ≈ 0.1 pJ/op**, **static power ≈ 0.16 µW**, **settle ≈ 0.1 ns**. These
+**energy ≈ 74 fJ/op**, **static power ≈ 0.10 µW**, **settle ≈ 79 ps** (all lower
+than the pre-optimization design, thanks to the smaller device count). These
 scale with the model card — swap in a foundry BSIM4 PDK for sign-off numbers.
+
+### 5.1 Why PySpice — and the ngspice-42 shim
+
+PySpice **is** used, on both ends: it constructs the `Circuit` object and emits
+`fp8_mac.sp`, and its `NgSpiceShared` binding runs the DC verification above.
+PySpice 1.5 ships a hard-coded list of "supported" ngspice versions that excludes
+v42 (the current Ubuntu build) and also misreads v42's benign `run` return status,
+so the stock `circuit.simulator().operating_point()` raises. Two small,
+well-contained shims in `_patch_pyspice()` fix it: (1) set
+`NgSpiceShared.NGSPICE_SUPPORTED_VERSION = 42`, and (2) wrap `exec_command` to
+swallow the spurious status. With those, PySpice's native simulator runs the
+whole MAC and returns node voltages normally. The `ngspice -b` batch path is kept
+as an automatic fallback (and for the transient), so the script works whether or
+not PySpice is importable.
 
 ---
 
@@ -195,29 +216,40 @@ marked **educational** and are a drop-in replacement for a foundry **BSIM4** car
 A conventional standard-cell FP8 **FMA** with full IEEE features (subnormals,
 round-to-nearest-even, infinities/NaN propagation, a wide normalize+round path)
 and pipeline flip-flops runs to **several thousand** transistors per PE. This
-design reaches **2216** by:
+design reaches **1454** by:
 
 1. **Fixed-point accumulate** (no LOD / normalize / rounder in the PE) — the
-   biggest saving and the correct choice for GEMM.
+   biggest architectural saving and the correct choice for GEMM.
 2. **Truncation** — no sticky tree, no rounding incrementer; out-of-window bits
    are just discarded.
 3. **Flush-to-zero of subnormals *and* NaN** — deletes those datapaths entirely.
-4. **No Infinity logic** (E4M3 has none); overflow saturates via one OR row.
+4. **No Infinity logic** (E4M3 has none); overflow saturates via a carry XOR.
 5. **Transmission-gate muxes / shifters** (4T) instead of static or dual-rail.
-6. **24T restored TG full adder**; 8T half adders where a column has two bits.
-7. **Shared arithmetic** — `eA+eB`, the `−LC_SUB`/`−SAT_THRESH` constants,
-   `drop` (an inverted carry) and `saturate` (a spare carry-out) all reuse the
-   same ripple adders.
-8. **Conditional two's-complement negate** = one XOR row + carry-in.
-9. **Flop-free combinational PE** — a systolic array supplies its own registers,
-   so the replicated cell carries none.
+6. **20T TG full adder** with restoration only every 4th ripple bit.
+
+The optimization pass then removed a further **762 transistors (2216 → 1454, −34 %)**
+by attacking idle transistors directly:
+
+7. **Constant folding in every cell** — a rail-tied input collapses the gate, so
+   no transistor drives a constant. This makes the **4×4 multiplier a 3×3** (the
+   implicit leading 1 is a constant VDD → its partial products are wires: 516→298),
+   and folds the **exponent/shift-control** adders that add `eSum` to constants
+   (`shift_ctrl` 266→64, `exp_add` 120→74, `decode` 146→106).
+8. **Pruned barrel shifter** — each stage builds muxes only for indices that can
+   be occupied, and the last stage only the read window (344→208).
+9. **Product-zero gated at the 8-bit shifter input**, not the 15–23-bit magnitude.
+10. **Overflow = XOR of the top two ripple carries** — no 17-bit sign-extended
+    add just to detect saturation (accumulate 620→542).
+11. **Shared arithmetic / free comparators** — `drop` is an inverted carry,
+    `saturate` a spare carry-out; the conditional negate is one XOR row + carry-in.
+12. **Flop-free combinational PE** — a systolic array supplies its own registers.
 
 ---
 
 ## 9. Further transistor reduction (roadmap)
 
 * **Serialize the multiplier** (bit-serial / 2-cycle 4×2) to roughly halve the
-  516-transistor array at a 2× latency cost — attractive when the PE is
+  ~300-transistor array at a 2× latency cost — attractive when the PE is
   replicated N² times.
 * **Carry-select or carry-skip** only where the accumulate path is timing-critical;
   otherwise keep the dense ripple.

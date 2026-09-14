@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 wf.dat
+scratch_*

@@ -186,56 +186,119 @@ class Netlist:
             d[m.block][0 if m.kind == "nmos" else 1] += 1
         return d
 
-    # -- static CMOS gates ---------------------------------------------------
+    # ------------------------------------------------------------------------
+    # Static CMOS gates.  ALL of them CONSTANT-FOLD: an input tied to VDD/GND
+    # collapses the gate to a wire/constant/inverter, so no transistor is ever
+    # spent driving a rail-tied input.  This is what removes the "idle"
+    # transistors -- constant operands (implicit leading 1s, bias constants,
+    # zero-padding) cost nothing.
+    # ------------------------------------------------------------------------
     def inv(self, a, y=None):
+        if a == "VDD": return "GND"
+        if a == "GND": return "VDD"
         y = y or self.net("inv"); self.pmos(y, a, "VDD"); self.nmos(y, a, "GND"); return y
     def nand2(self, a, b, y=None):
+        if a == "GND" or b == "GND": return "VDD"
+        if a == "VDD": return self.inv(b)
+        if b == "VDD": return self.inv(a)
         y = y or self.net("nand"); self.pmos(y, a, "VDD"); self.pmos(y, b, "VDD")
         mid = self.net("nd"); self.nmos(y, a, mid); self.nmos(mid, b, "GND"); return y
     def nor2(self, a, b, y=None):
+        if a == "VDD" or b == "VDD": return "GND"
+        if a == "GND": return self.inv(b)
+        if b == "GND": return self.inv(a)
         y = y or self.net("nor"); mid = self.net("nu")
         self.pmos(y, a, mid); self.pmos(mid, b, "VDD")
         self.nmos(y, a, "GND"); self.nmos(y, b, "GND"); return y
+    def and2(self, a, b, y=None):
+        if a == "GND" or b == "GND": return "GND"
+        if a == "VDD": return b
+        if b == "VDD": return a
+        return self.inv(self.nand2(a, b), y)
+    def or2(self, a, b, y=None):
+        if a == "VDD" or b == "VDD": return "VDD"
+        if a == "GND": return b
+        if b == "GND": return a
+        return self.inv(self.nor2(a, b), y)
     def nand3(self, a, b, c, y=None):
+        if "GND" in (a, b, c): return "VDD"
+        vs = [x for x in (a, b, c) if x != "VDD"]
+        if len(vs) <= 2: return self.nand2(vs[0], vs[1]) if len(vs) == 2 else self.inv(vs[0]) if vs else "GND"
         y = y or self.net("nand3"); self.pmos(y, a, "VDD"); self.pmos(y, b, "VDD"); self.pmos(y, c, "VDD")
         m1 = self.net("nd"); m2 = self.net("nd")
         self.nmos(y, a, m1); self.nmos(m1, b, m2); self.nmos(m2, c, "GND"); return y
     def nor4(self, a, b, c, d, y=None):
+        if "VDD" in (a, b, c, d): return "GND"
+        vs = [x for x in (a, b, c, d) if x != "GND"]
+        if len(vs) < 4:
+            r = "GND"
+            for x in vs: r = self.or2(r, x)
+            return self.inv(r)
         y = y or self.net("nor4"); m1 = self.net("nu"); m2 = self.net("nu"); m3 = self.net("nu")
         self.pmos(y, a, m1); self.pmos(m1, b, m2); self.pmos(m2, c, m3); self.pmos(m3, d, "VDD")
         for x in (a, b, c, d): self.nmos(y, x, "GND")
         return y
-    def and2(self, a, b, y=None): return self.inv(self.nand2(a, b), y)
-    def or2(self, a, b, y=None):  return self.inv(self.nor2(a, b), y)
     def and3(self, a, b, c, y=None): return self.inv(self.nand3(a, b, c), y)
 
-    # -- transmission gate & TG logic ---------------------------------------
+    # -- transmission gate & TG logic (also constant-folding) ----------------
     def tgate(self, a, y, c, cn):
         self.nmos(a, c, y); self.pmos(a, cn, y); return y
     def mux2(self, a, b, s, sn=None, y=None):
+        if s == "GND": return a
+        if s == "VDD": return b
+        if a == b: return a
         y = y or self.net("mux")
         if sn is None: sn = self.inv(s)
         self.tgate(a, y, sn, s); self.tgate(b, y, s, sn); return y
     def xor2(self, a, b, y=None, an=None, bn=None):
+        if a == "GND": return b
+        if a == "VDD": return self.inv(b)
+        if b == "GND": return a
+        if b == "VDD": return self.inv(a)
         y = y or self.net("xor")
         an = an if an is not None else self.inv(a)
         bn = bn if bn is not None else self.inv(b)
         self.tgate(a, y, bn, b); self.tgate(an, y, b, bn); return y
+    def xnor2(self, a, b, y=None):
+        if a == "GND": return self.inv(b)
+        if a == "VDD": return b
+        if b == "GND": return self.inv(a)
+        if b == "VDD": return a
+        an = self.inv(a); bn = self.inv(b); y = y or self.net("xnor")
+        self.tgate(an, y, bn, b); self.tgate(a, y, b, bn); return y
 
-    # -- adders --------------------------------------------------------------
-    def full_adder(self, a, b, cin, sname=None):
-        """24T transmission-gate full adder with a restored (buffered) carry so a
-        long ripple chain keeps full drive.  (vs 28T mirror adder, vs unreliable
-        10T pass-only designs.)"""
+    # -- adders (constant-folding) -------------------------------------------
+    def full_adder(self, a, b, cin, sname=None, restore=False):
+        """20T transmission-gate full adder (TG XOR sum + TG-mux carry).  With
+        any constant input it folds to a half-adder / inverter / wire.  Set
+        restore=True to buffer the carry (drive integrity on long ripples)."""
+        ins = [a, b, cin]
+        vars = [x for x in ins if x not in ("VDD", "GND")]
+        ones = sum(1 for x in ins if x == "VDD")
+        if len(vars) == 0:
+            t = ones
+            return ("VDD" if t & 1 else "GND"), ("VDD" if (t >> 1) & 1 else "GND")
+        if len(vars) == 1:
+            x = vars[0]
+            return (x, "GND") if ones == 0 else (self.inv(x), x) if ones == 1 else (x, "VDD")
+        if len(vars) == 2:
+            x, z = vars
+            if ones == 0: return self.half_adder(x, z, sname)
+            return self.xnor2(x, z, y=sname), self.or2(x, z)     # x+z+1
         an = self.inv(a); bn = self.inv(b)
         p  = self.xor2(a, b, an=an, bn=bn); pn = self.inv(p); cinn = self.inv(cin)
         s  = self.xor2(p, cin, an=pn, bn=cinn, y=sname)
         cout = self.net("cout")
         self.tgate(cin, cout, p, pn)      # cout = p ? cin : a   ( = majority )
         self.tgate(a,   cout, pn, p)
-        cout_r = self.inv(self.inv(cout)) # restore drive
-        return s, cout_r
+        if restore:
+            cout = self.inv(self.inv(cout))
+        return s, cout
     def half_adder(self, a, b, sname=None):
+        if a == "GND": return b, "GND"
+        if b == "GND": return a, "GND"
+        if a == "VDD": return self.inv(b), b
+        if b == "VDD": return self.inv(a), a
         an = self.inv(a); bn = self.inv(b)
         s = self.xor2(a, b, an=an, bn=bn, y=sname); c = self.and2(a, b); return s, c
 
@@ -243,11 +306,23 @@ class Netlist:
 # ============================================================================
 # SECTION 3 -- multi-bit datapath helpers
 # ============================================================================
-def ripple_add(nl, A, B, cin="GND"):
-    s = []; c = cin
+def ripple_add(nl, A, B, cin="GND", restore_every=4):
+    """n-bit ripple add. A restoring buffer is inserted on the carry every
+    `restore_every` stages so a long ripple keeps full drive without paying a
+    buffer at every bit."""
+    s, carries = _ripple(nl, A, B, cin, restore_every)
+    return s, carries[-1]
+
+def _ripple(nl, A, B, cin="GND", restore_every=4):
+    """As ripple_add but also returns the full carry chain (carry OUT of each
+    bit), so signed-overflow = xor(carry-into-MSB, carry-out) needs no extra
+    sign-extension bit."""
+    s = []; c = cin; carries = []
     for i in range(len(A)):
-        si, c = nl.full_adder(A[i], B[i], c); s.append(si)
-    return s, c
+        rst = (restore_every and i and i % restore_every == 0)
+        si, c = nl.full_adder(A[i], B[i], c, restore=rst)
+        s.append(si); carries.append(c)
+    return s, carries
 
 def const_bits(value, n):
     return ["VDD" if (value >> i) & 1 else "GND" for i in range(n)]
@@ -259,7 +334,9 @@ def multiply_unsigned(nl, A, B):
     cols = [[] for _ in range(na + nb)]
     for i in range(na):
         for j in range(nb):
-            cols[i + j].append(nl.and2(A[i], B[j]))
+            pp = nl.and2(A[i], B[j])          # folds: VDD*x->x, GND*x->0
+            if pp != "GND":
+                cols[i + j].append(pp)         # drop zero partial products
     ncol = len(cols)
     while max(len(c) for c in cols) > 2:
         new = [[] for _ in range(ncol + 1)]
@@ -300,9 +377,11 @@ def build_mac(nl):
         e_all1 = nl.and2(nl.and2(e[0], e[1]), nl.and2(e[2], e[3]))
         m_all1 = nl.and2(nl.and2(m[0], m[1]), m[2])
         nan = nl.and2(e_all1, m_all1)                           # E4M3 NaN
-        zero = nl.or2(e_is0, nan)
-        nz = nl.inv(zero)
-        S = [nl.and2(m[0], nz), nl.and2(m[1], nz), nl.and2(m[2], nz), nz]  # {m,1}
+        zero = nl.or2(e_is0, nan)                              # FTZ subnormal & NaN
+        # significand = {m2,m1,m0, implicit-1}.  The leading 1 is a *constant*
+        # (VDD): the multiplier folds it away, and a zero/subnormal/NaN operand
+        # is handled by 'prodzero' forcing the aligned addend to 0 downstream.
+        S = [m[0], m[1], m[2], "VDD"]
         return s, S, e, zero
     sA, SA, eA, zA = decode(A)
     sB, SB, eB, zB = decode(B)
@@ -335,36 +414,56 @@ def build_mac(nl):
     Lc = (Lc5 + ["GND"] * n_stage)[:n_stage]
     dbg.update(drop=drop, sat=sat, Lc=Lc)
 
-    # ---- alignment barrel shifter (SP << Lc), then M = T[OFF:OFF+MAG] ------
-    nl.set_block("shifter")
-    bus = SP + ["GND"] * (WT_SHIFT - len(SP))
-    for stage, sh in enumerate(LC_STAGES):
-        ctrl = Lc[stage]; ctrln = nl.inv(ctrl); nb = []
-        for i in range(WT_SHIFT):
-            src = bus[i - sh] if i - sh >= 0 else "GND"
-            nb.append(nl.mux2(bus[i], src, ctrl, sn=ctrln))
-        bus = nb
-    Mraw = bus[OFF_SHIFT:OFF_SHIFT + MAG_BITS]
-
-    # ---- gate: force 0 on drop/product-zero, all-ones on saturate ---------
+    # ---- gate the 8-bit product into the aligner (cheaper than gating the
+    #      wide M): force 0 on underflow(drop) or product-zero. --------------
     nl.set_block("shift_gate")
     force0  = nl.or2(drop, prodzero); force0n = nl.inv(force0)
     sat_eff = nl.and2(sat, nl.inv(prodzero))
-    M = [nl.or2(nl.and2(Mraw[i], force0n), sat_eff) for i in range(MAG_BITS)]
+    SPg = [nl.and2(SP[i], force0n) for i in range(len(SP))]
+
+    # ---- alignment barrel shifter (SPg << Lc); read window M = T[OFF:OFF+MAG]
+    # Per-stage PRUNING: a stage only builds muxes for bit indices that can be
+    # occupied (forward), and the LAST stage only builds the read window -- no
+    # transistor computes a bit that is provably 0 or never read.
+    nl.set_block("shifter")
+    bus = list(SPg)                         # occupied indices 0..hi
+    hi = len(SPg) - 1
+    lastk = len(LC_STAGES) - 1
+    for stage, sh in enumerate(LC_STAGES):
+        ctrl = Lc[stage]; nb_hi = min(hi + sh, WT_SHIFT - 1)
+        if stage == lastk:
+            lo_i, hi_i = OFF_SHIFT, min(nb_hi, OFF_SHIFT + MAG_BITS - 1)
+        else:
+            lo_i, hi_i = 0, nb_hi
+        ctrln = nl.inv(ctrl)
+        nb = ["GND"] * (hi_i + 1)
+        for i in range(lo_i, hi_i + 1):
+            cur = bus[i] if i <= hi else "GND"
+            src = bus[i - sh] if 0 <= i - sh <= hi else "GND"
+            nb[i] = nl.mux2(cur, src, ctrl, sn=ctrln)
+        bus = nb; hi = hi_i
+    Mraw = [(bus[i] if i < len(bus) else "GND")
+            for i in range(OFF_SHIFT, OFF_SHIFT + MAG_BITS)]
+
+    # ---- OR-in saturation (all-ones) --------------------------------------
+    nl.set_block("shift_gate")
+    M = [nl.or2(Mraw[i], sat_eff) for i in range(MAG_BITS)]
     dbg["M"] = M
 
     # ---- sign + two's-complement saturating accumulate --------------------
+    # W_ACC-bit add with conditional negate (Bx = M^sP, carry-in = sP).  Signed
+    # overflow V = (carry into MSB) xor (carry out) -- no 17th sign-extend bit.
     nl.set_block("accumulate")
     Macc = M + ["GND"]                                         # zero-extend to W_ACC
     Bx  = [nl.xor2(Macc[i], sP) for i in range(W_ACC)]         # conditional negate
     sgn = W_ACC - 1
-    Cin_ext = Cin + [Cin[sgn]]; Bx_ext = Bx + [Bx[sgn]]       # sign-extend to W_ACC+1
-    s, _ = ripple_add(nl, Cin_ext, Bx_ext, cin=sP)
-    ovfp = nl.and2(nl.inv(s[W_ACC]), s[sgn])                  # + overflow
-    ovfn = nl.and2(s[W_ACC], nl.inv(s[sgn]))                  # - overflow
-    nsat = nl.or2(ovfp, ovfn); nsatn = nl.inv(nsat)
+    s, carries = _ripple(nl, Cin, Bx, cin=sP)
+    V = nl.xor2(carries[sgn], carries[sgn - 1])               # signed overflow
+    ovfp = nl.and2(V, s[sgn])                                 # wrapped +→−  : clamp max
+    ovfn = nl.and2(V, nl.inv(s[sgn]))                         # wrapped −→+  : clamp min
+    nsat = V; nsatn = nl.inv(V)
     Cout = [nl.mux2(s[i], ovfp, nsat, sn=nsatn) for i in range(sgn)]
-    Cout.append(s[W_ACC])                                     # true sign
+    Cout.append(nl.mux2(s[sgn], nl.inv(s[sgn]), V, sn=nsatn)) # sign flips on overflow
     nl.outputs = Cout; dbg["Cout"] = Cout; dbg["s17"] = s
     return A, B, Cin, Cout, dbg
 
@@ -502,6 +601,76 @@ def build_pyspice_circuit(nl, vdd=VDD_DEFAULT):
         c.MOSFET(m.name[1:], d, m.g, s, b, model=model,
                  width=m.w_nm * 1e-9, length=m.l_nm * 1e-9)
     return c
+
+# --- PySpice NATIVE simulation (drives libngspice through PySpice) ----------
+# PySpice 1.5 hard-codes a supported-ngspice-version list that excludes v42 and
+# also misreads v42's benign 'run' return status.  These two shims let PySpice's
+# OWN NgSpiceShared binding execute and return results normally.
+_PYSPICE_PATCHED = False
+def _patch_pyspice():
+    global _PYSPICE_PATCHED
+    if _PYSPICE_PATCHED:
+        return True
+    try:
+        import PySpice.Spice.NgSpice.Shared as SH
+    except Exception:
+        return False
+    try:
+        SH.NgSpiceShared.NGSPICE_SUPPORTED_VERSION = 42
+    except Exception:
+        pass
+    _orig = SH.NgSpiceShared.exec_command
+    def _safe(self, command, join_lines=True):
+        try:
+            return _orig(self, command, join_lines)
+        except SH.NgSpiceCommandError:
+            return ""            # v42 returns a status PySpice 1.5 misreads
+    SH.NgSpiceShared.exec_command = _safe
+    _PYSPICE_PATCHED = True
+    return True
+
+def pyspice_available():
+    try:
+        import PySpice  # noqa
+        return _patch_pyspice()
+    except Exception:
+        return False
+
+def run_pyspice_dc(nl, tests, A, B, Cin, Cout, vdd=VDD_DEFAULT):
+    """DC operating-point functional check driven ENTIRELY through PySpice
+    (build Circuit -> PySpice ngspice-shared simulator -> read node voltages)."""
+    import numpy as np
+    from PySpice.Unit import u_V
+    if not _patch_pyspice():
+        return None
+    c = build_pyspice_circuit(nl, vdd)
+    ins = A + B + Cin
+    for i, n in enumerate(ins):                       # one DC source per input
+        c.V(f"IN{i}", n, c.gnd, 0 @ u_V)
+    out = []
+    for (label, a, b, cc) in tests:
+        drv = {}
+        for i in range(8): drv[A[i]] = (a >> i) & 1
+        for i in range(8): drv[B[i]] = (b >> i) & 1
+        for i in range(W_ACC): drv[Cin[i]] = (cc >> i) & 1
+        for i, n in enumerate(ins):
+            c[f"VIN{i}"].dc_value = (vdd if drv[n] else 0) @ u_V
+        try:
+            an = c.simulator(simulator="ngspice-shared").operating_point()
+        except Exception:
+            return None
+        volt = {str(k).lower(): float(np.asarray(v)[0]) for k, v in an.nodes.items()}
+        got = 0; good = True
+        for i, node in enumerate(Cout):
+            key = node.lower()
+            if node == "VDD": bit = 1
+            elif node == "GND": bit = 0
+            elif key in volt: bit = 1 if volt[key] > vdd / 2 else 0
+            else: good = False; bit = 0
+            got |= bit << i
+        exp = mac_hw(a, b, cc)["Cout"]
+        out.append((label, a, b, cc, got if good else None, exp))
+    return out
 
 def dump_spice_netlist(nl, path, vdd=VDD_DEFAULT):
     """Write a flat pure-transistor SPICE netlist (uses PySpice if available)."""
@@ -695,20 +864,19 @@ def gemm_analysis(K=8, ntrials=64, seed=3, pool=None):
 # SECTION 9 -- reporting
 # ============================================================================
 BLOCK_JUSTIFY = {
-    "multiplier": "4x4 unsigned significand mult; Dadda column compression uses "
-                  "8T half-/24T full-adders instead of a 28T-mirror array.",
-    "accumulate": "16b two's-complement saturating adder; conditional-negate via "
-                  "one XOR row + carry-in (no separate subtractor).",
-    "shifter":    "log barrel shifter (stages 1,2,4,8) built from 4T "
-                  "transmission-gate 2:1 muxes -- no decoder, no dual-rail.",
-    "shift_ctrl": "exponent compare/subtract reuses ripple adders; drop = the "
-                  "Lc-subtractor's inverted carry, saturate = a spare carry-out.",
-    "shift_gate": "forces addend to 0 (underflow/zero operand) or all-ones "
-                  "(overflow) with 1 AND + 1 OR per bit.",
-    "decode":     "significand gating + FTZ of subnormals & NaN removes the "
-                  "entire subnormal/NaN datapath.",
-    "exp_add":    "single 5-bit ripple adder for eA+eB (bias folded into the "
-                  "constant subtract in shift_ctrl).",
+    "multiplier": "implicit leading-1 is a constant, so the 4x4 folds to a 3x3 "
+                  "(9 ANDs); Dadda compression with 20T FA / 10T HA.",
+    "accumulate": "W_ACC two's-complement saturating adder (20T FAs); negate = 1 "
+                  "XOR row + carry-in; overflow = xor of top two carries.",
+    "shifter":    "log barrel shifter of 4T TG muxes, PRUNED to the occupied "
+                  "range per stage + read window on the last stage.",
+    "shift_ctrl": "eSum +/- CONSTANT folds half its full-adders to half-adders; "
+                  "drop = inverted carry, saturate = a spare carry-out.",
+    "shift_gate": "gates the 8-bit product to 0 (underflow/zero) at the shifter "
+                  "input, then ORs saturation into the aligned magnitude.",
+    "decode":     "FTZ subnormals & NaN + constant implicit-1 -> no significand "
+                  "gating gates and no subnormal/NaN datapath.",
+    "exp_add":    "single 5-bit ripple adder for eA+eB (top bits fold away).",
     "sign":       "one XOR gate.",
 }
 
@@ -760,15 +928,29 @@ DESIGN DECISIONS THAT REDUCE TRANSISTOR COUNT
     row -- no Inf encode/decode logic.
 5.  Transmission-gate 2:1 muxes (4T) for the barrel shifter and output select,
     instead of static-CMOS muxes (~12T) or dual-rail CPL.
-6.  24T TG full adder (restored carry) instead of the 28T mirror adder; 8T half
-    adders where a column has only two bits.
-7.  Bias handling folded into constants: eA+eB and the -LC_SUB / -SAT_THRESH
-    constants share the ripple adders; 'drop' is the Lc-subtractor's inverted
-    carry-out and 'saturate' is a spare carry-out -- the comparators are free.
-8.  Conditional two's-complement negate = one XOR row + carry-in; no dedicated
-    subtractor block.
-9.  Combinational core (no pipeline flops): a systolic array adds its own
-    registers around the PE; keeping the PE flop-free minimizes replicated area.
+6.  20T TG full adder (TG-XOR sum + TG-mux carry), NOT the 28T mirror adder; a
+    restoring carry buffer is added only every 4th bit of a long ripple, not at
+    every bit -- so drive is maintained without a buffer per stage.
+7.  CONSTANT FOLDING everywhere (the "no idle transistor" rule): every gate/
+    adder collapses when an input is tied to a rail.  Consequences:
+      * the 4x4 multiplier is really a 3x3: the implicit leading 1 is a constant
+        VDD, so its partial products are wires, not AND gates (516 -> ~300 T);
+      * the exponent/shift-control adders add eSum to CONSTANTS, so half their
+        full-adders fold to half-adders (shift_ctrl 266 -> ~64 T);
+      * 'drop' is the Lc-subtractor's inverted carry, 'saturate' a spare
+        carry-out -- the comparators cost almost nothing.
+8.  Implicit-1 handled purely by the multiplier folding + 'prodzero' gating, so
+    the significand needs NO leading-1-select gates in decode.
+9.  Barrel shifter is PRUNED: each stage builds muxes only for bit indices that
+    can be occupied, and the final stage builds only the read window -- no mux
+    computes a bit that is provably 0 or never read (344 -> ~208 T).
+10. Product-zero / underflow forces the 8-bit product to 0 at the shifter INPUT
+    (8 gates), not the 15..23-bit aligned magnitude.
+11. Signed-overflow saturation = XOR of the top two ripple carries -- no 17th
+    sign-extension bit, no extra adder.
+12. Conditional two's-complement negate = one XOR row + carry-in; no subtractor.
+13. Combinational core (no pipeline flops): a systolic array supplies its own
+    registers; keeping the PE flop-free minimizes replicated area.
 """
 
 def config_sweep(configs=((16, -6), (20, -8), (24, -8)), verify_vectors=300):
@@ -845,31 +1027,35 @@ def main():
         print(f"[verify] exhaustive: {len(exv)} vectors, {ef} failures "
               f"-> {'PASS' if ef == 0 else 'FAIL'}")
 
-    # ---- ngspice DC + transient -----------------------------------------
-    if not args.no_spice and have_ngspice():
-        print("\n[ngspice] DC operating-point functional check ...")
-        tests = [
-            ("1x1+0",   enc(0,7,0), enc(0,7,0), 0),
-            ("2x3+0",   enc(0,8,0), enc(0,8,4), 0),
-            ("neg2x3",  enc(1,8,0), enc(0,8,4), 0),
-            ("1x1+1.0", enc(0,7,0), enc(0,7,0), real_to_acc(1.0)),
-            ("subn*x",  enc(0,0,3), enc(0,8,0), 0),      # subnormal -> FTZ
-            ("nan*x",   enc(0,15,7), enc(0,7,0), 0),     # NaN -> FTZ
-            ("448x448", enc(0,15,6), enc(0,15,6), 0),    # overflow -> sat
-            ("min*min", enc(0,1,0), enc(0,1,0), 0),      # underflow -> 0
-        ]
-        dc = ngspice_dc(nl, tests, A, B, Cin, Cout, vdd=args.vdd)
-        allok = True
-        for (label, a, b, c, got, exp) in dc:
-            ok = got == exp
-            allok &= ok
+    # ---- analog DC + transient ------------------------------------------
+    tests = [
+        ("1x1+0",   enc(0,7,0), enc(0,7,0), 0),
+        ("2x3+0",   enc(0,8,0), enc(0,8,4), 0),
+        ("neg2x3",  enc(1,8,0), enc(0,8,4), 0),
+        ("1x1+1.0", enc(0,7,0), enc(0,7,0), real_to_acc(1.0)),
+        ("subn*x",  enc(0,0,3), enc(0,8,0), 0),      # subnormal -> FTZ
+        ("nan*x",   enc(0,15,7), enc(0,7,0), 0),     # NaN -> FTZ
+        ("448x448", enc(0,15,6), enc(0,15,6), 0),    # overflow -> sat
+        ("min*min", enc(0,1,0), enc(0,1,0), 0),      # underflow -> 0
+    ]
+    if not args.no_spice and (pyspice_available() or have_ngspice()):
+        # Prefer PySpice's OWN ngspice binding; fall back to the ngspice binary.
+        dc = run_pyspice_dc(nl, tests, A, B, Cin, Cout, vdd=args.vdd)
+        engine = "PySpice(ngspice-shared)"
+        if dc is None and have_ngspice():
+            dc = ngspice_dc(nl, tests, A, B, Cin, Cout, vdd=args.vdd)
+            engine = "ngspice -b"
+        print(f"\n[spice] DC operating-point functional check via {engine} ...")
+        allok = dc is not None
+        for (label, a, b, c, got, exp) in (dc or []):
+            ok = got == exp; allok &= ok
             g = f"0x{got:04x}" if got is not None else "----"
             print(f"    {label:9s} A=0x{a:02x} B=0x{b:02x} C=0x{c:04x}  "
-                  f"ngspice={g} golden=0x{exp:04x}  {'OK' if ok else 'MISMATCH'}")
-        print(f"[ngspice] DC functional: {'ALL OK' if allok else 'MISMATCH'}")
+                  f"spice={g} golden=0x{exp:04x}  {'OK' if ok else 'MISMATCH'}")
+        print(f"[spice] DC functional: {'ALL OK' if allok else 'MISMATCH/UNAVAILABLE'}")
 
-        print("\n[ngspice] transient (energy / power / delay) ...")
-        tr = ngspice_transient(nl, A, B, Cin, Cout, vdd=args.vdd)
+        print("\n[spice] transient (energy / power / delay) via ngspice ...")
+        tr = ngspice_transient(nl, A, B, Cin, Cout, vdd=args.vdd) if have_ngspice() else None
         if tr:
             print(f"    energy/op       ~ {tr['energy_fj']:.1f} fJ  (Vdd={args.vdd} V)")
             print(f"    static power    ~ {tr['pstat_nw']:.1f} nW")

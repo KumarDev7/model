@@ -43,9 +43,9 @@ The script degrades gracefully: if ngspice/PySpice are missing it still builds
 the netlist, counts transistors and runs the switch-level verification.
 
 
-[build] FP8 E4M3 MAC built: 2216 MOSFETs
+[build] FP8 E4M3 MAC built: 1454 MOSFETs
 
-[netlist] SPICE netlist written to fp8_mac.sp (pyspice); 2216 devices
+[netlist] SPICE netlist written to fp8_mac.sp (pyspice); 1454 devices
 
 ========================================================================
  TRANSISTOR-COUNT REPORT  (pure MOSFET, explicit W/L)
@@ -55,55 +55,69 @@ the netlist, counts transistors and runs the switch-level verification.
 
   block          NMOS   PMOS  total   justification
   --------------------------------------------------------------------
-  accumulate      310    310    620   
-      -> 16b two's-complement saturating adder; conditional-negate via 
-         one XOR row + carry-in (no separate subtractor). 
-  multiplier      258    258    516   
-      -> 4x4 unsigned significand mult; Dadda column compression uses 
-         8T half-/24T full-adders instead of a 28T-mirror array. 
-  shifter         172    172    344   
-      -> log barrel shifter (stages 1,2,4,8) built from 4T 
-         transmission-gate 2:1 muxes -- no decoder, no dual-rail. 
-  shift_ctrl      133    133    266   
-      -> exponent compare/subtract reuses ripple adders; drop = the 
-         Lc-subtractor's inverted carry, saturate = a spare carry-out. 
-  shift_gate       98     98    196   
-      -> forces addend to 0 (underflow/zero operand) or all-ones 
-         (overflow) with 1 AND + 1 OR per bit. 
-  decode           73     73    146   
-      -> significand gating + FTZ of subnormals & NaN removes the 
-         entire subnormal/NaN datapath. 
-  exp_add          60     60    120   
-      -> single 5-bit ripple adder for eA+eB (bias folded into the 
-         constant subtract in shift_ctrl). 
+  accumulate      271    271    542   
+      -> W_ACC two's-complement saturating adder (20T FAs); negate = 1 
+         XOR row + carry-in; overflow = xor of top two carries. 
+  multiplier      149    149    298   
+      -> implicit leading-1 is a constant, so the 4x4 folds to a 3x3 
+         (9 ANDs); Dadda compression with 20T FA / 10T HA. 
+  shifter         104    104    208   
+      -> log barrel shifter of 4T TG muxes, PRUNED to the occupied 
+         range per stage + read window on the last stage. 
+  shift_gate       77     77    154   
+      -> gates the 8-bit product to 0 (underflow/zero) at the shifter 
+         input, then ORs saturation into the aligned magnitude. 
+  decode           53     53    106   
+      -> FTZ subnormals & NaN + constant implicit-1 -> no significand 
+         gating gates and no subnormal/NaN datapath. 
+  exp_add          37     37     74   
+      -> single 5-bit ripple adder for eA+eB (top bits fold away). 
+  shift_ctrl       32     32     64   
+      -> eSum +/- CONSTANT folds half its full-adders to half-adders; 
+         drop = inverted carry, saturate = a spare carry-out. 
   sign              4      4      8   
       -> one XOR gate. 
   --------------------------------------------------------------------
-  TOTAL                        2216   MOSFETs
+  TOTAL                        1454   MOSFETs
 
-  Estimated placed area @65nm: 576.7 um^2
-  Estimated placed area @28nm: 107.0 um^2
-  Active gate area (sum W*L): 39.8880 um^2 (60nm draw)
+  Estimated placed area @65nm: 378.4 um^2
+  Estimated placed area @28nm: 70.2 um^2
+  Active gate area (sum W*L): 26.1720 um^2 (60nm draw)
 ========================================================================
 
 [verify] switch-level (transistor) simulation vs bit-exact golden ...
 [verify] structured+random: 2800 vectors, 0 failures -> PASS
+Unsupported Ngspice version 42
+Using SPARSE 1.3 as Direct Linear Solver
+Using SPARSE 1.3 as Direct Linear Solver
+Using SPARSE 1.3 as Direct Linear Solver
+Note: Starting dynamic gmin stepping
+Note: Dynamic gmin stepping completed
+Using SPARSE 1.3 as Direct Linear Solver
+Using SPARSE 1.3 as Direct Linear Solver
+Note: Starting dynamic gmin stepping
+Note: Dynamic gmin stepping completed
+Using SPARSE 1.3 as Direct Linear Solver
+Using SPARSE 1.3 as Direct Linear Solver
+Using SPARSE 1.3 as Direct Linear Solver
+Note: Starting dynamic gmin stepping
+Note: Dynamic gmin stepping completed
 
-[ngspice] DC operating-point functional check ...
-    1x1+0     A=0x38 B=0x38 C=0x0000  ngspice=0x0040 golden=0x0040  OK
-    2x3+0     A=0x40 B=0x44 C=0x0000  ngspice=0x0180 golden=0x0180  OK
-    neg2x3    A=0xc0 B=0x44 C=0x0000  ngspice=0xfe80 golden=0xfe80  OK
-    1x1+1.0   A=0x38 B=0x38 C=0x0040  ngspice=0x0080 golden=0x0080  OK
-    subn*x    A=0x03 B=0x40 C=0x0000  ngspice=0x0000 golden=0x0000  OK
-    nan*x     A=0x7f B=0x38 C=0x0000  ngspice=0x0000 golden=0x0000  OK
-    448x448   A=0x7e B=0x7e C=0x0000  ngspice=0x7fff golden=0x7fff  OK
-    min*min   A=0x08 B=0x08 C=0x0000  ngspice=0x0000 golden=0x0000  OK
-[ngspice] DC functional: ALL OK
+[spice] DC operating-point functional check via PySpice(ngspice-shared) ...
+    1x1+0     A=0x38 B=0x38 C=0x0000  spice=0x0040 golden=0x0040  OK
+    2x3+0     A=0x40 B=0x44 C=0x0000  spice=0x0180 golden=0x0180  OK
+    neg2x3    A=0xc0 B=0x44 C=0x0000  spice=0xfe80 golden=0xfe80  OK
+    1x1+1.0   A=0x38 B=0x38 C=0x0040  spice=0x0080 golden=0x0080  OK
+    subn*x    A=0x03 B=0x40 C=0x0000  spice=0x0000 golden=0x0000  OK
+    nan*x     A=0x7f B=0x38 C=0x0000  spice=0x0000 golden=0x0000  OK
+    448x448   A=0x7e B=0x7e C=0x0000  spice=0x7fff golden=0x7fff  OK
+    min*min   A=0x08 B=0x08 C=0x0000  spice=0x0000 golden=0x0000  OK
+[spice] DC functional: ALL OK
 
-[ngspice] transient (energy / power / delay) ...
-    energy/op       ~ 98.5 fJ  (Vdd=1.0 V)
-    static power    ~ 158.0 nW
-    output settle   ~ 125 ps (combinational, generic model)
+[spice] transient (energy / power / delay) via ngspice ...
+    energy/op       ~ 73.9 fJ  (Vdd=1.0 V)
+    static power    ~ 101.3 nW
+    output settle   ~ 79 ps (combinational, generic model)
 
 [gemm] matrix-multiply-style accumulation vs ideal arithmetic (normalized inputs, 16-bit acc):
     K= 4 x64: mean|err|=0.0080 (0.51 LSB)  rms=0.0105  relerr(|sum|>1)=1.24%
@@ -113,9 +127,9 @@ the netlist, counts transistors and runs the switch-level verification.
 
 [tradeoff] accumulator width vs transistors vs GEMM(K=16) accuracy:
     W_ACC  KL   transistors   range        LSB      meanErr    verify
-       16  -6        2216    +/-512       0.0156   0.0167(1.1LSB)  PASS(556)
-       20  -8        2574    +/-2048      0.0039   0.0019(0.5LSB)  PASS(556)
-       24  -8        2846    +/-32768     0.0039   0.0019(0.5LSB)  PASS(556)
+       16  -6        1454    +/-512       0.0156   0.0167(1.1LSB)  PASS(556)
+       20  -8        1720    +/-2048      0.0039   0.0019(0.5LSB)  PASS(556)
+       24  -8        1906    +/-32768     0.0039   0.0019(0.5LSB)  PASS(556)
 
 DESIGN DECISIONS THAT REDUCE TRANSISTOR COUNT
 ---------------------------------------------
@@ -131,14 +145,28 @@ DESIGN DECISIONS THAT REDUCE TRANSISTOR COUNT
     row -- no Inf encode/decode logic.
 5.  Transmission-gate 2:1 muxes (4T) for the barrel shifter and output select,
     instead of static-CMOS muxes (~12T) or dual-rail CPL.
-6.  24T TG full adder (restored carry) instead of the 28T mirror adder; 8T half
-    adders where a column has only two bits.
-7.  Bias handling folded into constants: eA+eB and the -LC_SUB / -SAT_THRESH
-    constants share the ripple adders; 'drop' is the Lc-subtractor's inverted
-    carry-out and 'saturate' is a spare carry-out -- the comparators are free.
-8.  Conditional two's-complement negate = one XOR row + carry-in; no dedicated
-    subtractor block.
-9.  Combinational core (no pipeline flops): a systolic array adds its own
-    registers around the PE; keeping the PE flop-free minimizes replicated area.
+6.  20T TG full adder (TG-XOR sum + TG-mux carry), NOT the 28T mirror adder; a
+    restoring carry buffer is added only every 4th bit of a long ripple, not at
+    every bit -- so drive is maintained without a buffer per stage.
+7.  CONSTANT FOLDING everywhere (the "no idle transistor" rule): every gate/
+    adder collapses when an input is tied to a rail.  Consequences:
+      * the 4x4 multiplier is really a 3x3: the implicit leading 1 is a constant
+        VDD, so its partial products are wires, not AND gates (516 -> ~300 T);
+      * the exponent/shift-control adders add eSum to CONSTANTS, so half their
+        full-adders fold to half-adders (shift_ctrl 266 -> ~64 T);
+      * 'drop' is the Lc-subtractor's inverted carry, 'saturate' a spare
+        carry-out -- the comparators cost almost nothing.
+8.  Implicit-1 handled purely by the multiplier folding + 'prodzero' gating, so
+    the significand needs NO leading-1-select gates in decode.
+9.  Barrel shifter is PRUNED: each stage builds muxes only for bit indices that
+    can be occupied, and the final stage builds only the read window -- no mux
+    computes a bit that is provably 0 or never read (344 -> ~208 T).
+10. Product-zero / underflow forces the 8-bit product to 0 at the shifter INPUT
+    (8 gates), not the 15..23-bit aligned magnitude.
+11. Signed-overflow saturation = XOR of the top two ripple carries -- no 17th
+    sign-extension bit, no extra adder.
+12. Conditional two's-complement negate = one XOR row + carry-in; no subtractor.
+13. Combinational core (no pipeline flops): a systolic array supplies its own
+    registers; keeping the PE flop-free minimizes replicated area.
 
 Done.
