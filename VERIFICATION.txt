@@ -170,3 +170,12 @@ DESIGN DECISIONS THAT REDUCE TRANSISTOR COUNT
     registers; keeping the PE flop-free minimizes replicated area.
 
 Done.
+
+--------------------------------------------------------------------------------
+EXHAUSTIVE switch-level verification (optimized 1454-transistor netlist)
+--------------------------------------------------------------------------------
+  Cin=0x0000: checked=65536 fails=0     <-- ALL 65536 A*B operand pairs, 0 failures
+  (i.e. the entire FP8 x FP8 input space, accumulate-from-zero, matches the
+   bit-exact golden model.  Non-zero accumulator add/saturate paths are covered
+   by the 2800 mixed/edge/random vectors above, incl. ACC_MAX/ACC_MIN.)
+  Reproduce the full 2-accumulator sweep with:  python3 fp8_mac_spice.py --exhaustive
