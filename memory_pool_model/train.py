@@ -230,7 +230,7 @@ def _fmt(metrics: Dict[str, Any]) -> str:
     return " ".join(f"{k}={float(v):.4g}" for k, v in metrics.items())
 
 
-def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = None):
+def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = None, meta: Dict[str, Any] | None = None):
     trainer = Trainer(mcfg, tcfg)
     rng = jax.random.PRNGKey(tcfg.seed)
     rng, init_rng = jax.random.split(rng)
@@ -277,7 +277,17 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
         with open(save_path, "wb") as f:
             f.write(serialization.to_bytes(state.params))
         with open(save_path + ".json", "w") as f:
-            json.dump({"model": dataclasses.asdict(mcfg), "train": dataclasses.asdict(tcfg)}, f, indent=2)
+            json.dump(
+                {
+                    "model": dataclasses.asdict(mcfg),
+                    "train": dataclasses.asdict(tcfg),
+                    "history": history,
+                    "train_seconds": time.time() - t0,
+                    **(meta or {}),
+                },
+                f,
+                indent=2,
+            )
         print(f"saved params to {save_path}")
     return trainer, state, history
 
@@ -310,13 +320,26 @@ def main():
     parser.add_argument("--text_path", type=str, default=None)
     parser.add_argument("--num_entities", type=int, default=4096)
     parser.add_argument("--num_relations", type=int, default=4)
+    parser.add_argument("--num_attributes", type=int, default=256)
+    parser.add_argument("--name_alphabet", type=int, default=16)
+    parser.add_argument("--name_len", type=int, default=3)
+    parser.add_argument("--data_seed", type=int, default=0)
     parser.add_argument("--save", type=str, default=None, help="path to save trained params")
     _add_dataclass_args(parser, ModelConfig)
     _add_dataclass_args(parser, TrainConfig)
     args = parser.parse_args()
 
+    meta = {}
     if args.task == "facts":
-        dataset = FactDataset(num_entities=args.num_entities, num_relations=args.num_relations)
+        meta["dataset"] = dict(
+            num_entities=args.num_entities,
+            num_relations=args.num_relations,
+            num_attributes=args.num_attributes,
+            name_alphabet=args.name_alphabet,
+            name_len=args.name_len,
+            seed=args.data_seed,
+        )
+        dataset = FactDataset(**meta["dataset"])
         mcfg = _from_args(ModelConfig, args, vocab_size=dataset.vocab_size, max_len=dataset.seq_len)
     else:
         if not args.text_path:
@@ -325,7 +348,7 @@ def main():
         dataset = TextDataset(args.text_path, seq_len=seq_len)
         mcfg = _from_args(ModelConfig, args, vocab_size=256)
     tcfg = _from_args(TrainConfig, args)
-    run(mcfg, tcfg, dataset, save_path=args.save)
+    run(mcfg, tcfg, dataset, save_path=args.save, meta=meta)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,471 @@
+<title>Memory Pool Knowledge Tests</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --page: #f4f6f5;
+  --surface: #fcfdfc;
+  --ink: #11191c;
+  --ink-2: #4a5559;
+  --muted: #7f898a;
+  --grid: #e0e5e3;
+  --axis: #c2c9c7;
+  --ring: rgba(17, 25, 28, 0.10);
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s1-wash: rgba(42, 120, 214, 0.10);
+  --good: #006300;
+  --bad: #b3261e;
+  --code-bg: #eaeeec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0e1212;
+    --surface: #161b1b;
+    --ink: #f1f4f3;
+    --ink-2: #b8c1bf;
+    --muted: #87908f;
+    --grid: #272e2d;
+    --axis: #3a4241;
+    --ring: rgba(255, 255, 255, 0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s1-wash: rgba(57, 135, 229, 0.14);
+    --good: #0ca30c;
+    --bad: #f07a72;
+    --code-bg: #1f2626;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0e1212;
+  --surface: #161b1b;
+  --ink: #f1f4f3;
+  --ink-2: #b8c1bf;
+  --muted: #87908f;
+  --grid: #272e2d;
+  --axis: #3a4241;
+  --ring: rgba(255, 255, 255, 0.10);
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s1-wash: rgba(57, 135, 229, 0.14);
+  --good: #0ca30c;
+  --bad: #f07a72;
+  --code-bg: #1f2626;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font: 15px/1.6 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding-inline: 16px;
+  padding-block: 40px 80px;
+}
+.wrap { max-width: 880px; margin: 0 auto; display: grid; gap: 56px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.25; }
+h1 { font-size: clamp(28px, 5vw, 38px); font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 22px; font-weight: 600; }
+h3 { font-size: 15px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; color: var(--ink-2); }
+p strong, li strong { color: var(--ink); font-weight: 600; }
+.mono, code { font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace; }
+code { font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+.eyebrow {
+  font: 500 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+}
+header { display: grid; gap: 14px; }
+header p { font-size: 17px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.tile {
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
+  padding: 16px 18px; display: grid; gap: 4px; align-content: start;
+}
+.tile .label { font-size: 13px; color: var(--ink-2); }
+.tile .value { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+.tile .sub { font-size: 12.5px; color: var(--muted); }
+section { display: grid; gap: 18px; }
+section > .head { display: grid; gap: 8px; }
+.answer {
+  border-left: 3px solid var(--s1); padding: 2px 0 2px 14px;
+  color: var(--ink); max-width: 68ch; font-size: 16px;
+}
+.figure {
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
+  padding: 18px 18px 12px; display: grid; gap: 10px; position: relative;
+}
+.figure .ftitle { font-size: 14px; font-weight: 600; }
+.figure .fsub { font-size: 12.5px; color: var(--muted); margin-top: -6px; }
+.chart { width: 100%; position: relative; }
+.chart svg { display: block; overflow: visible; }
+.chart text { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; fill: var(--muted); }
+.chart .lab { fill: var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.tip {
+  position: absolute; pointer-events: none; background: var(--ink); color: var(--page);
+  font: 12px/1.45 "IBM Plex Mono", ui-monospace, monospace; padding: 6px 9px; border-radius: 6px;
+  white-space: nowrap; z-index: 5; transform: translate(-50%, calc(-100% - 10px));
+}
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: 0.02em; }
+td { font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; }
+.pill.good { color: var(--good); }
+.pill.bad { color: var(--bad); }
+ul.notes { margin: 0; padding-left: 20px; color: var(--ink-2); max-width: 70ch; display: grid; gap: 6px; }
+footer { color: var(--muted); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">JAX memory-pool LM · knowledge tests</div>
+    <h1>How much does the memory pool actually know?</h1>
+    <p id="lede"></p>
+    <div class="tiles" id="tiles"></div>
+  </header>
+
+  <section id="s-acc">
+    <div class="head">
+      <div class="eyebrow">Test 1 · accuracy</div>
+      <h2>Does it answer correctly, and does the pool matter?</h2>
+    </div>
+    <p class="answer" id="acc-answer"></p>
+    <div class="figure">
+      <div class="ftitle" id="acc-title">Accuracy on every fact</div>
+      <div class="fsub">Same data and training steps. Dense models have no pool.</div>
+      <div class="chart" id="c-acc"></div>
+    </div>
+    <div class="tablewrap"><table id="t-acc"></table></div>
+  </section>
+
+  <section id="s-cap">
+    <div class="head">
+      <div class="eyebrow">Test 2 · capacity</div>
+      <h2>How many facts fit in a fixed pool?</h2>
+    </div>
+    <p class="answer" id="cap-answer"></p>
+    <div class="figure">
+      <div class="ftitle">Accuracy as the number of facts grows (1,024-vector pool)</div>
+      <div class="legend" id="l-cap"></div>
+      <div class="chart" id="c-cap"></div>
+    </div>
+    <div class="tablewrap"><table id="t-cap"></table></div>
+  </section>
+
+  <section id="s-merge">
+    <div class="head">
+      <div class="eyebrow">Test 3 · merging vectors</div>
+      <h2>How many vectors does one fact need?</h2>
+    </div>
+    <p class="answer" id="merge-answer"></p>
+    <div class="figure">
+      <div class="ftitle">Accuracy vs. vectors fetched per token at inference</div>
+      <div class="fsub">The model was trained fetching 64 per token (4 heads × top-16).</div>
+      <div class="chart" id="c-topk"></div>
+    </div>
+  </section>
+
+  <section id="s-share">
+    <div class="head">
+      <div class="eyebrow">Test 4 · shared vectors</div>
+      <h2>Can one vector hold a 3rd fact next to two others?</h2>
+    </div>
+    <p class="answer" id="share-answer"></p>
+    <div class="figure">
+      <div class="ftitle">How many facts use each vector as their strongest match</div>
+      <div class="fsub">Top-1 vector of each head, counted over all facts. Last bar is 64 or more.</div>
+      <div class="chart" id="c-hist"></div>
+    </div>
+    <div class="tablewrap"><table id="t-groups"></table></div>
+    <p id="triplet-text"></p>
+  </section>
+
+  <section id="s-ablate">
+    <div class="head">
+      <div class="eyebrow">Test 5 · deleting vectors</div>
+      <h2>Is the knowledge really stored in the pool?</h2>
+    </div>
+    <p class="answer" id="ablate-answer"></p>
+    <div class="two">
+      <div class="figure">
+        <div class="ftitle">Delete a random share of the pool</div>
+        <div class="chart" id="c-rand"></div>
+      </div>
+      <div class="figure">
+        <div class="ftitle">Delete the vectors one fact relies on</div>
+        <div class="chart" id="c-target"></div>
+      </div>
+    </div>
+    <p id="neigh-text"></p>
+  </section>
+
+  <section id="s-ret">
+    <div class="head">
+      <div class="eyebrow">Test 6 · adding facts later</div>
+      <h2>If it learns new facts, does it keep the old ones?</h2>
+    </div>
+    <p class="answer" id="ret-answer"></p>
+    <div class="legend" id="l-ret"></div>
+    <div class="two">
+      <div class="figure">
+        <div class="ftitle">Old facts (set A)</div>
+        <div class="chart" id="c-retA"></div>
+      </div>
+      <div class="figure">
+        <div class="ftitle">New facts (set B)</div>
+        <div class="chart" id="c-retB"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-setup">
+    <div class="head">
+      <div class="eyebrow">Setup</div>
+      <h2>What was tested</h2>
+    </div>
+    <ul class="notes" id="setup"></ul>
+  </section>
+
+  <footer>Generated by <code>experiments/make_report.py</code> from <code>experiments/results/*.json</code>.</footer>
+</div>
+
+<script>
+const DATA = __DATA__;
+const A = DATA.analysis, D = DATA.dense, C = DATA.capacity, R = DATA.retention;
+const $ = (id) => document.getElementById(id);
+const pct = (v, d = 1) => (100 * v).toFixed(d) + "%";
+const num = (v) => Math.round(v).toLocaleString("en-US");
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function tipFor(host) {
+  let t = host.querySelector(".tip");
+  if (!t) { t = document.createElement("div"); t.className = "tip"; t.hidden = true; host.appendChild(t); }
+  return t;
+}
+function legend(id, series) {
+  $(id).innerHTML = series.map(s => `<span><i style="background:${s.color}"></i>${s.name}</span>`).join("");
+}
+
+// ---- line chart: series [{name,color,points:[[x,y]]}], x {log2, ticks, fmt, label}, y {min,max,ticks,fmt}
+function lineChart(host, opt) {
+  const W = host.clientWidth, H = opt.height || 240;
+  const m = { l: 46, r: 16, t: 12, b: 38 };
+  host.querySelector("svg")?.remove();
+  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": opt.aria || "" });
+  host.prepend(svg);
+  const xs = opt.series.flatMap(s => s.points.map(p => p[0]));
+  const fx = opt.x.log2 ? Math.log2 : (v) => v;
+  const x0 = fx(opt.x.min ?? Math.min(...xs)), x1 = fx(opt.x.max ?? Math.max(...xs));
+  const X = (v) => m.l + (fx(v) - x0) / (x1 - x0 || 1) * (W - m.l - m.r);
+  const Y = (v) => m.t + (1 - (v - opt.y.min) / (opt.y.max - opt.y.min)) * (H - m.t - m.b);
+  for (const t of opt.y.ticks) {
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: t === opt.y.min ? css("--axis") : css("--grid"), "stroke-width": 1 }, svg);
+    el("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end" }, svg).textContent = opt.y.fmt(t);
+  }
+  for (const t of opt.x.ticks) {
+    el("text", { x: X(t), y: H - m.b + 18, "text-anchor": "middle" }, svg).textContent = opt.x.fmt(t);
+  }
+  if (opt.x.label) el("text", { x: (m.l + W - m.r) / 2, y: H - 4, "text-anchor": "middle", class: "lab" }, svg).textContent = opt.x.label;
+  for (const s of opt.series) {
+    if (opt.area && opt.series.length === 1) {
+      const d = s.points.map((p, i) => `${i ? "L" : "M"}${X(p[0])},${Y(p[1])}`).join("") +
+        `L${X(s.points.at(-1)[0])},${Y(opt.y.min)}L${X(s.points[0][0])},${Y(opt.y.min)}Z`;
+      el("path", { d, fill: css("--s1-wash"), stroke: "none" }, svg);
+    }
+    el("path", {
+      d: s.points.map((p, i) => `${i ? "L" : "M"}${X(p[0])},${Y(p[1])}`).join(""),
+      fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    }, svg);
+    if (s.points.length <= 10) for (const p of s.points) el("circle", { cx: X(p[0]), cy: Y(p[1]), r: 4, fill: s.color, stroke: css("--surface"), "stroke-width": 2 }, svg);
+  }
+  // hover: nearest x
+  const allX = [...new Set(xs)].sort((a, b) => a - b);
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1, visibility: "hidden" }, svg);
+  const tip = tipFor(host);
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left;
+    let best = allX[0];
+    for (const v of allX) if (Math.abs(X(v) - px) < Math.abs(X(best) - px)) best = v;
+    cross.setAttribute("x1", X(best)); cross.setAttribute("x2", X(best)); cross.setAttribute("visibility", "visible");
+    const rows = opt.series.map(s => {
+      const p = s.points.find(q => q[0] === best);
+      return p ? `${opt.series.length > 1 ? s.name + ": " : ""}${opt.y.fmt(p[1], true)}` : null;
+    }).filter(Boolean);
+    const ys = opt.series.map(s => s.points.find(q => q[0] === best)).filter(Boolean).map(p => Y(p[1]));
+    tip.innerHTML = `<b>${opt.x.tipFmt ? opt.x.tipFmt(best) : opt.x.fmt(best)}</b><br>${rows.join("<br>")}`;
+    tip.style.left = X(best) + "px"; tip.style.top = Math.min(...ys) + "px"; tip.hidden = false;
+  };
+  hit.addEventListener("mousemove", move); hit.addEventListener("touchstart", move, { passive: true });
+  hit.addEventListener("mouseleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+}
+
+// ---- horizontal bars: rows [{label, value, color, tip}]
+function barChart(host, rows, opt = {}) {
+  const W = host.clientWidth, rowH = 34, lab = Math.min(200, W * 0.38);
+  const H = rows.length * rowH + 24;
+  host.querySelector("svg")?.remove();
+  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": opt.aria || "" });
+  host.prepend(svg);
+  const x0 = lab + 8, x1 = W - 56;
+  const X = (v) => x0 + v * (x1 - x0);
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+    el("line", { x1: X(t), x2: X(t), y1: 0, y2: H - 22, stroke: t === 0 ? css("--axis") : css("--grid"), "stroke-width": 1 }, svg);
+    el("text", { x: X(t), y: H - 6, "text-anchor": "middle" }, svg).textContent = (t * 100) + "%";
+  }
+  const tip = tipFor(host);
+  rows.forEach((r, i) => {
+    const y = i * rowH + 7, h = 20, w = Math.max(0, X(r.value) - x0);
+    const t = el("text", { x: lab, y: y + 14, "text-anchor": "end", class: "lab" }, svg);
+    t.textContent = r.label;
+    t.style.fontFamily = "IBM Plex Sans, system-ui, sans-serif"; t.style.fontSize = "12.5px";
+    const rr = Math.min(4, w / 2);
+    el("path", { d: `M${x0},${y}H${x0 + w - rr}Q${x0 + w},${y} ${x0 + w},${y + rr}V${y + h - rr}Q${x0 + w},${y + h} ${x0 + w - rr},${y + h}H${x0}Z`, fill: r.color }, svg);
+    el("text", { x: x0 + w + 6, y: y + 14, class: "lab" }, svg).textContent = pct(r.value);
+    const hit = el("rect", { x: 0, y: y - 5, width: W, height: rowH, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", () => {
+      tip.innerHTML = r.tip || `${r.label}: ${pct(r.value)}`; tip.style.left = (x0 + w / 2) + "px"; tip.style.top = y + "px"; tip.hidden = false;
+    });
+    hit.addEventListener("mouseleave", () => { tip.hidden = true; });
+  });
+}
+
+// ---- columns (histogram): bins [{label, value}]
+function columnChart(host, bins, opt) {
+  const W = host.clientWidth, H = 220, m = { l: 46, r: 10, t: 10, b: 36 };
+  host.querySelector("svg")?.remove();
+  const svg = el("svg", { width: W, height: H, role: "img", "aria-label": opt.aria || "" });
+  host.prepend(svg);
+  const max = opt.max, Y = (v) => m.t + (1 - v / max) * (H - m.t - m.b);
+  for (const t of opt.ticks) {
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: t === 0 ? css("--axis") : css("--grid"), "stroke-width": 1 }, svg);
+    el("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end" }, svg).textContent = num(t);
+  }
+  const band = (W - m.l - m.r) / bins.length, bw = Math.min(24, band - 2);
+  const tip = tipFor(host);
+  bins.forEach((b, i) => {
+    const cx = m.l + band * (i + 0.5), y = Y(b.value), h = Y(0) - y, rr = Math.min(4, h / 2, bw / 2);
+    if (h > 0) el("path", { d: `M${cx - bw / 2},${Y(0)}V${y + rr}Q${cx - bw / 2},${y} ${cx - bw / 2 + rr},${y}H${cx + bw / 2 - rr}Q${cx + bw / 2},${y} ${cx + bw / 2},${y + rr}V${Y(0)}Z`, fill: css("--s1") }, svg);
+    if (opt.showLabel(i)) el("text", { x: cx, y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = b.label;
+    const hit = el("rect", { x: cx - band / 2, y: m.t, width: band, height: H - m.t - m.b, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", () => { tip.innerHTML = opt.tip(b); tip.style.left = cx + "px"; tip.style.top = y + "px"; tip.hidden = false; });
+    hit.addEventListener("mouseleave", () => { tip.hidden = true; });
+  });
+  el("text", { x: (m.l + W - m.r) / 2, y: H - 2, "text-anchor": "middle", class: "lab" }, svg).textContent = opt.xLabel;
+}
+
+const accTicks = { min: 0, max: 1, ticks: [0, 0.25, 0.5, 0.75, 1], fmt: (v, tip) => tip ? pct(v) : (v * 100) + "%" };
+
+function render() {
+  // ---- header
+  const acc = A.accuracy.top1;
+  const noPool = A.random_ablation.find(r => r.fraction_deleted === 1).accuracy;
+  const use = A.pool_usage_on_facts;
+  $("lede").innerHTML = `A small transformer (309k parameters) reads from one trainable pool of <strong>${num(A.pool_size)} vectors</strong>. It was trained on <strong>${num(A.num_facts)} made-up facts</strong> of the form <code>entity + relation → attribute</code>, then tested six ways: accuracy, capacity, how facts are spread over vectors, deleting vectors, and adding new facts later.`;
+  $("tiles").innerHTML = [
+    ["Fact accuracy", pct(acc), `${num(A.accuracy.facts_correct)} of ${num(A.num_facts)} facts correct`],
+    ["Without the pool", pct(noPool), "same model, every pool vector zeroed"],
+    ["Pool vectors in use", pct(use.active_10pct_of_fair_share), `get ≥10% of a fair share of fetches`],
+    ["Vectors per token", String(A.fetch_per_token), `out of ${num(A.pool_size)} (${pct(A.fetch_per_token / A.pool_size)})`],
+  ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join("");
+
+  // ---- test 1
+  $("acc-title").textContent = `Accuracy on all ${num(A.num_facts)} facts`;
+  const names = { main: "Memory-pool model", dense_small: "Dense, same backbone", dense_matched: "Dense, same total params" };
+  const colors = { main: css("--s1"), dense_small: css("--axis"), dense_matched: css("--muted") };
+  barChart($("c-acc"), D.map(r => ({ label: names[r.name], value: r.accuracy, color: colors[r.name],
+    tip: `${names[r.name]}<br>${pct(r.accuracy)} · ${num(r.params)} params` })), { aria: "Accuracy by model" });
+  $("t-acc").innerHTML = `<tr><th>Model</th><th>Parameters</th><th>of which pool</th><th>Accuracy</th><th>Mean p(correct)</th><th>Train time (CPU)</th></tr>` +
+    D.map(r => `<tr><td>${names[r.name]}</td><td>${num(r.params)}</td><td>${num(r.pool_params)}</td><td>${pct(r.accuracy)}</td><td>${r.mean_p_true.toFixed(3)}</td><td>${Math.round(r.train_seconds / 60)} min</td></tr>`).join("");
+  const dm = D.find(r => r.name === "dense_matched"), ds = D.find(r => r.name === "dense_small");
+  $("acc-answer").innerHTML = ANSWERS.acc({ acc, dm, ds, per: A.accuracy.per_relation, conf: A.accuracy["confident_correct_p>0.9"] });
+
+  // ---- test 2
+  const capS = [
+    { name: "With 1,024-vector pool", color: css("--s1"), points: C.filter(r => r.memory_accuracy != null).map(r => [r.facts, r.memory_accuracy]) },
+    { name: "Backbone only, no pool", color: css("--s2"), points: C.filter(r => r.dense_accuracy != null).map(r => [r.facts, r.dense_accuracy]) },
+  ];
+  legend("l-cap", capS);
+  lineChart($("c-cap"), { series: capS, y: accTicks, aria: "Accuracy vs number of facts",
+    x: { log2: true, ticks: C.map(r => r.facts), fmt: (v) => (v / 1024) + "k", tipFmt: (v) => `${num(v)} facts (${v / 1024} per vector)`, label: "facts to learn" } });
+  $("t-cap").innerHTML = `<tr><th>Facts</th><th>Facts per vector</th><th>Pool: accuracy</th><th>Pool: facts stored</th><th>Pool vectors in use</th><th>No pool: accuracy</th><th>No pool: facts stored</th></tr>` +
+    C.map(r => `<tr><td>${num(r.facts)}</td><td>${r.facts_per_vector}</td><td>${pct(r.memory_accuracy)}</td><td>${num(r.memory_facts_stored)}</td><td>${pct(r.pool_active)}</td><td>${pct(r.dense_accuracy)}</td><td>${num(r.dense_facts_stored)}</td></tr>`).join("");
+  $("cap-answer").innerHTML = ANSWERS.cap(C);
+
+  // ---- test 3
+  const tk = A.topk_at_inference;
+  lineChart($("c-topk"), { series: [{ name: "accuracy", color: css("--s1"), points: tk.map(r => [r.vectors_per_token, r.accuracy]) }],
+    y: accTicks, area: true, aria: "Accuracy vs vectors fetched",
+    x: { log2: true, ticks: tk.map(r => r.vectors_per_token), fmt: (v) => String(v), tipFmt: (v) => `${v} vectors / token`, label: "vectors fetched per token" } });
+  $("merge-answer").innerHTML = ANSWERS.merge(tk, A.mixing);
+
+  // ---- test 4
+  const hist = Object.entries(A.sharing.hist).map(([k, v]) => ({ k: +k, v }));
+  const bins = [];
+  for (let k = 1; k <= 64; k++) { const h = hist.find(b => b.k === k); bins.push({ label: k === 64 ? "64+" : String(k), k, value: h ? h.v : 0 }); }
+  const hmax = Math.max(...bins.map(b => b.value));
+  const step = hmax > 400 ? 200 : hmax > 200 ? 100 : hmax > 80 ? 50 : 20;
+  columnChart($("c-hist"), bins, { max: Math.ceil(hmax / step) * step, ticks: Array.from({ length: Math.ceil(hmax / step) + 1 }, (_, i) => i * step),
+    showLabel: (i) => [0, 7, 15, 31, 47, 63].includes(i), xLabel: "facts sharing the vector",
+    tip: (b) => `${b.value.toLocaleString()} vectors hold ${b.label} fact${b.k > 1 ? "s" : ""}`, aria: "Facts per vector histogram" });
+  $("t-groups").innerHTML = `<tr><th>Facts in one vector (all different answers)</th><th>Groups tested</th><th>All recalled</th><th>Random facts, same group size</th></tr>` +
+    A.shared_vector_groups.map(g => `<tr><td>${g.facts_in_vector}</td><td>${num(g.n_groups)}</td><td>${pct(g.all_correct)}</td><td>${pct(g.all_correct_random_groups)}</td></tr>`).join("");
+  $("share-answer").innerHTML = ANSWERS.share(A.sharing, A.shared_vector_groups);
+  $("triplet-text").innerHTML = ANSWERS.triplet(A.triplets, acc);
+
+  // ---- test 5
+  lineChart($("c-rand"), { series: [{ name: "accuracy", color: css("--s1"), points: A.random_ablation.map(r => [r.fraction_deleted, r.accuracy]) }],
+    y: accTicks, area: true, height: 220, aria: "Accuracy vs fraction of pool deleted",
+    x: { min: 0, max: 1, ticks: [0, 0.25, 0.5, 0.75, 1], fmt: (v) => (v * 100) + "%", tipFmt: (v) => `${pct(v, 0)} of pool deleted`, label: "share of pool deleted" } });
+  const ta = A.targeted_ablation;
+  barChart($("c-target"), ta.fact_survives.map(r => ({ label: `delete top ${r.vectors_deleted}`, value: r.accuracy, color: css("--s1"),
+    tip: `Delete the fact's top ${r.vectors_per_head} per head (${r.vectors_deleted})<br>fact still correct: ${pct(r.accuracy)}` })), { aria: "Targeted deletion" });
+  $("ablate-answer").innerHTML = ANSWERS.ablate(A.random_ablation, ta, acc);
+  $("neigh-text").innerHTML = ANSWERS.neigh(ta);
+
+  // ---- test 6
+  if (R) {
+    const variants = [
+      ["memory/full", "Pool model, train everything", css("--s1")],
+      ["memory/pool_values_only", "Pool model, train only pool vectors", css("--s3")],
+      ["dense_matched/full", "Dense, same total params", css("--s2")],
+    ].filter(v => R.curves[v[0]]);
+    legend("l-ret", variants.map(v => ({ name: v[1], color: v[2] })));
+    for (const [key, id] of [["acc_A", "c-retA"], ["acc_B", "c-retB"]]) {
+      lineChart($(id), { series: variants.map(([k, n, c]) => ({ name: n, color: c, points: R.curves[k].map(p => [p.step, p[key]]) })),
+        y: accTicks, height: 220, aria: key,
+        x: { min: 0, max: R.steps_A + R.steps_B, ticks: [0, R.steps_A, R.steps_A + R.steps_B], fmt: (v) => v === R.steps_A ? `${v} (switch)` : String(v), tipFmt: (v) => `step ${v}${v > R.steps_A ? " · learning B" : " · learning A"}`, label: "training step" } });
+    }
+    $("ret-answer").innerHTML = ANSWERS.ret(R);
+  } else {
+    $("s-ret").hidden = true;
+  }
+  $("setup").innerHTML = SETUP.map(s => `<li>${s}</li>`).join("");
+}
+
+// ---- narrative (filled in after the results are known)
+__TEXT__
+
+let rt; render();
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 120); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
