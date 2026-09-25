@@ -128,7 +128,10 @@ def test_training_reduces_loss(use_memory):
     state = trainer.init(jax.random.PRNGKey(0))
     rng = np.random.default_rng(0)
     first = last = None
-    for i in range(40):
+    # without the memory-layer FFN, coverage starts lower and climbs with
+    # training (31% at step 40, 66% at 160 here; 99.6% on the full run)
+    steps = 160 if use_memory else 40
+    for i in range(steps):
         state, metrics, queries = trainer.train_step(state, ds.sample(rng, 16), jax.random.PRNGKey(i))
         if use_memory and (i + 1) % 10 == 0:
             state, _ = trainer.revive(state, queries, jax.random.PRNGKey(100 + i))
@@ -161,10 +164,12 @@ def _tiny_model(**kw):
 def test_memory_layer_without_ffn():
     _, params, _ = _tiny_model(memory_ffn=False)
     assert "ffn_in_0" in params and "ffn_in_1" not in params  # layer 1 is the memory layer
+    _, params, _ = _tiny_model(memory_ffn=True)
+    assert "ffn_in_1" in params
 
 
 def test_route_through_pool_blocks_backbone_shortcut():
-    model, params, tokens = _tiny_model()
+    model, params, tokens = _tiny_model(memory_ffn=True)
 
     def grads(route, pool_off=False):
         f = lambda p: model.apply({"params": p}, tokens, route_through_pool=route, pool_off=pool_off)[0].sum()
@@ -203,7 +208,8 @@ def test_phases_switch_on_at_the_right_step():
     assert phase_at(t, 5) == {"route": False, "nopool": False, "freeze": False}
     assert phase_at(t, 11) == {"route": True, "nopool": True, "freeze": False}
     assert phase_at(t, 21)["freeze"]
-    assert phase_at(TrainConfig(), 100) == {"route": False, "nopool": False, "freeze": False}
+    assert phase_at(TrainConfig(nopool_true_coef=0.0), 100) == {"route": False, "nopool": False, "freeze": False}
+    assert phase_at(TrainConfig(), 1)["nopool"]  # the no-pool penalty is on by default
 
 
 def test_freeze_trains_only_the_pool_path():
@@ -219,3 +225,120 @@ def test_freeze_trains_only_the_pool_path():
     np.testing.assert_array_equal(new.params["embed"]["embedding"], state.params["embed"]["embedding"])
     assert not np.array_equal(new.params["pool"]["values"], state.params["pool"]["values"])
     assert not np.array_equal(new.params["router_1"]["kernel"], state.params["router_1"]["kernel"])
+
+
+# ---- scale: sparse pool updates, resume, data parallel ----
+def test_sparse_row_grads_equal_dense_grads():
+    from memory_pool_model.train import fetched_row_grads, merge_values, split_values
+    ds, trainer = _tiny_setup()
+    state = trainer.init(jax.random.PRNGKey(0))
+    batch = ds.sample(np.random.default_rng(0), 8)
+    rng = jax.random.PRNGKey(3)
+    # dense reference
+    g_full = jax.grad(lambda p: trainer._loss(p, batch, rng, True)[0])(state.params)
+    # sparse: grads for non-pool params + fetched rows only
+    values, rest = split_values(state.params)
+    B, T = batch["inputs"].shape
+    probes = {1: jnp.zeros((B, T, trainer.mcfg.d_value))}
+    (_, (_, aux)), (g_rest, g_probe) = jax.value_and_grad(
+        lambda r, pr: trainer._loss(merge_values(r, values), batch, rng, True, probes=pr),
+        argnums=(0, 1), has_aux=True)(rest, probes)
+    uniq, rows = fetched_row_grads(aux, g_probe, [1], trainer.mcfg.pool_size)
+    dense_from_sparse = jnp.zeros_like(values).at[uniq].add(rows, mode="drop")
+    np.testing.assert_allclose(dense_from_sparse, g_full["pool"]["values"], rtol=1e-4, atol=1e-6)
+    _, g_full_rest = split_values(g_full)
+    for a, b in zip(jax.tree_util.tree_leaves(g_rest), jax.tree_util.tree_leaves(g_full_rest)):
+        np.testing.assert_allclose(a, b, rtol=1e-4, atol=1e-6)
+    # rows that were never fetched have exactly zero gradient
+    untouched = np.setdiff1d(np.arange(trainer.mcfg.pool_size), np.asarray(uniq))
+    assert np.all(np.asarray(g_full["pool"]["values"])[untouched] == 0)
+
+
+def test_sparse_update_changes_only_fetched_rows():
+    ds, trainer = _tiny_setup()
+    assert trainer.sparse
+    state = trainer.init(jax.random.PRNGKey(0))
+    batch = ds.sample(np.random.default_rng(0), 2)
+    s1, m1, _ = trainer.train_step(state, batch, jax.random.PRNGKey(1))
+    s2, m2, _ = trainer.train_step(s1, batch, jax.random.PRNGKey(2))  # lr > 0 from step 2
+    changed = np.any(np.asarray(s2.params["pool"]["values"]) != np.asarray(s1.params["pool"]["values"]), axis=1)
+    assert 0 < changed.sum() <= int(m2["rows_updated"]) < trainer.mcfg.pool_size
+
+
+def test_dense_pool_updates_still_train():
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4)
+    trainer = Trainer(mcfg, TrainConfig(steps=40, batch_size=16, warmup_steps=5, sparse_pool_updates=False))
+    assert not trainer.sparse
+    state = trainer.init(jax.random.PRNGKey(0))
+    rng = np.random.default_rng(0)
+    losses = []
+    for i in range(40):
+        state, metrics, _ = trainer.train_step(state, ds.sample(rng, 16), jax.random.PRNGKey(i))
+        losses.append(float(metrics["ce"]))
+    assert losses[-1] < losses[0]
+
+
+def test_run_end_to_end_dense_and_sparse(tmp_path):
+    from memory_pool_model.train import run
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4)
+    for sparse in (True, False):  # run() donates buffers, which the dense path once broke
+        tcfg = TrainConfig(steps=6, batch_size=16, warmup_steps=2, revive_every=3, log_every=100,
+                           eval_every=100, sparse_pool_updates=sparse)
+        _, state, hist = run(mcfg, tcfg, ds, save_path=str(tmp_path / f"m{sparse}"))
+        assert int(state.step) == 6 and hist and np.isfinite(hist[-1]["ce"])
+
+
+def test_resume_is_exact(tmp_path):
+    from memory_pool_model.train import run
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4)
+    tcfg = TrainConfig(steps=24, batch_size=16, warmup_steps=5, revive_every=5, log_every=100, eval_every=100)
+    _, full, _ = run(mcfg, tcfg, ds, save_path=str(tmp_path / "a"))
+    run(mcfg, tcfg, ds, save_path=str(tmp_path / "b"), stop_after=11)
+    _, resumed, _ = run(mcfg, tcfg, ds, save_path=str(tmp_path / "b"), resume=True)
+    for a, b in zip(jax.tree_util.tree_leaves(full), jax.tree_util.tree_leaves(resumed)):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_data_parallel_matches_single_device():
+    """Runs in a subprocess with 2 virtual CPU devices."""
+    import subprocess, sys, textwrap
+    code = textwrap.dedent("""
+        import jax, numpy as np
+        from jax.sharding import Mesh
+        from memory_pool_model.config import ModelConfig, TrainConfig
+        from memory_pool_model.data import FactDataset
+        from memory_pool_model.train import Trainer
+        assert jax.device_count() == 2
+        ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+        mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                           n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4, routing_noise=0.0)
+        tcfg = TrainConfig(steps=10, batch_size=16, warmup_steps=2)
+        out = []
+        for mesh in (None, Mesh(np.array(jax.devices()), ("data",))):
+            tr = Trainer(mcfg, tcfg, mesh=mesh)
+            st = tr.place_state(tr.init(jax.random.PRNGKey(0)))
+            rng = np.random.default_rng(0)
+            for i in range(5):
+                st, m, _ = tr.train_step(st, tr.place_batch(ds.sample(rng, 16)), jax.random.PRNGKey(i))
+            out.append((float(m["loss"]), jax.device_get(st.params)))
+        assert abs(out[0][0] - out[1][0]) < 1e-4, (out[0][0], out[1][0])
+        # Attention key biases have an exactly-zero true gradient (softmax
+        # ignores a shift shared by all keys); Adam turns their float noise
+        # into full-size steps, so they legitimately differ. Compare the rest.
+        for (path, a), b in zip(jax.tree_util.tree_flatten_with_path(out[0][1])[0],
+                                jax.tree_util.tree_leaves(out[1][1])):
+            if "'key']['bias'" in jax.tree_util.keystr(path):
+                continue
+            np.testing.assert_allclose(a, b, rtol=2e-3, atol=2e-5)
+        print("OK")
+    """)
+    env = {**__import__("os").environ, "XLA_FLAGS": "--xla_force_host_platform_device_count=2",
+           "JAX_PLATFORMS": "cpu"}
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=600)
+    assert r.returncode == 0 and "OK" in r.stdout, r.stdout + r.stderr

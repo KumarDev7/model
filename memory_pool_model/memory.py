@@ -81,8 +81,12 @@ class MemoryPool(nn.Module):
         return self.n_sub_keys**2
 
     def __call__(
-        self, queries: jax.Array, *, train: bool = False
+        self, queries: jax.Array, *, train: bool = False, sparse_grad: bool = False
     ) -> Tuple[jax.Array, Dict[str, Any]]:
+        """sparse_grad: don't differentiate through the value table. The
+        trainer then builds gradients for just the fetched rows (see
+        train.py), so gradient/optimizer work scales with rows used, not
+        with pool size."""
         lead_shape = queries.shape[:-2]
         H, n, k = self.heads, self.n_sub_keys, self.top_k
         half = self.d_key // 2
@@ -120,7 +124,8 @@ class MemoryPool(nn.Module):
 
         # Fetch and mix knowledge vectors; heads are summed.
         weights = jax.nn.softmax(slot_scores, axis=-1)
-        fetched = jnp.take(self.values, slots, axis=0)  # [M, H, k, d_value]
+        values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
+        fetched = jnp.take(values, slots, axis=0)  # [M, H, k, d_value]
         out = jnp.einsum("mhk,mhkd->md", weights, fetched)
         out = out.reshape(*lead_shape, self.d_value)
 

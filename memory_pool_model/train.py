@@ -28,15 +28,18 @@ from .memory import key_diversity_loss, revive_dead_keys
 from .model import MemoryPoolLM
 
 QUERY_SAMPLE = 2048  # recent queries kept for reviving dead sub-keys
+ADAM_B1, ADAM_B2, ADAM_EPS = 0.9, 0.999, 1e-8  # optax.adamw defaults, reused for the pool
 
 
 @struct.dataclass
 class TrainState:
     step: jax.Array
-    params: Any
-    opt_state: Any
+    params: Any  # full parameter tree (pool values included)
+    opt_state: Any  # optax state for everything except the pool values (sparse mode)
     subkey_usage: jax.Array  # [H, 2, n] EMA of sub-key selection frequency
     slot_usage: jax.Array  # [N] EMA of slot selection frequency
+    pool_m: jax.Array  # [N, D] lazy-Adam first moment of pool values ((0,) if dense)
+    pool_v: jax.Array  # [N, D] lazy-Adam second moment
 
 
 def phase_at(tcfg: TrainConfig, step: int) -> Dict[str, bool]:
@@ -59,10 +62,27 @@ def _path_is(path, *names) -> bool:
     return keys[: len(names)] == list(names)
 
 
-def make_optimizer(tcfg: TrainConfig) -> optax.GradientTransformation:
-    schedule = optax.warmup_cosine_decay_schedule(
+def split_values(params):
+    """(values, rest): the pool value table and every other parameter."""
+    pool = dict(params["pool"])
+    values = pool.pop("values")
+    return values, {**params, "pool": pool}
+
+
+def merge_values(rest, values):
+    return {**rest, "pool": {**rest["pool"], "values": values}}
+
+
+def make_schedule(tcfg: TrainConfig):
+    return optax.warmup_cosine_decay_schedule(
         0.0, tcfg.lr, tcfg.warmup_steps, max(tcfg.steps, tcfg.warmup_steps + 1), tcfg.lr * 0.1
     )
+
+
+def make_optimizer(tcfg: TrainConfig, clip: bool = True) -> optax.GradientTransformation:
+    """AdamW for the dense parameters. In sparse mode the pool values are not
+    in the tree (they get lazy Adam in the train step) and clipping is done
+    by hand over both parts, so clip=False."""
 
     def decay_mask(params):
         # Decay backbone matrices only; decaying the pool would erase knowledge
@@ -80,11 +100,12 @@ def make_optimizer(tcfg: TrainConfig) -> optax.GradientTransformation:
 
         return optax.GradientTransformation(lambda _: optax.EmptyState(), update)
 
-    return optax.chain(
-        optax.clip_by_global_norm(tcfg.grad_clip),
-        optax.adamw(schedule, weight_decay=tcfg.weight_decay, mask=decay_mask),
+    parts = [optax.clip_by_global_norm(tcfg.grad_clip)] if clip else []
+    parts += [
+        optax.adamw(make_schedule(tcfg), weight_decay=tcfg.weight_decay, mask=decay_mask),
         scale_pool_values(tcfg.pool_lr_mult),
-    )
+    ]
+    return optax.chain(*parts)
 
 
 def usage_stats(usage: jax.Array) -> Dict[str, jax.Array]:
@@ -98,36 +119,96 @@ def usage_stats(usage: jax.Array) -> Dict[str, jax.Array]:
     }
 
 
+def fetched_row_grads(aux, probe_grads, layers, pool_size):
+    """Gradient of the loss w.r.t. the pool rows fetched this step.
+
+    For a read out = sum_f w_f * V[s_f], dL/dV[s] = sum over fetches of s of
+    w_f * dL/dout. dL/dout comes from the zero probes added to each read.
+    Returns (unique_slots [U], row_grads [U, D]); padding slots equal
+    pool_size (out of range) and are dropped by the caller's scatters.
+    """
+    slots, contribs = [], []
+    for layer, sl, w in zip(layers, aux["slots"], aux["weights"]):
+        g = probe_grads[layer]  # [B, T, D]
+        d = g.shape[-1]
+        sl = sl.reshape(-1, sl.shape[-2] * sl.shape[-1])  # [BT, H*k]
+        w = jax.lax.stop_gradient(w).reshape(sl.shape)
+        contribs.append((w[..., None] * g.reshape(-1, 1, d)).reshape(-1, d))
+        slots.append(sl.reshape(-1))
+    slots, contribs = jnp.concatenate(slots), jnp.concatenate(contribs)
+    cap = min(slots.shape[0], pool_size)
+    uniq, inv = jnp.unique(slots, size=cap, fill_value=pool_size, return_inverse=True)
+    rows = jax.ops.segment_sum(contribs, inv.reshape(-1), num_segments=cap)
+    return uniq, rows
+
+
 class Trainer:
-    def __init__(self, mcfg: ModelConfig, tcfg: TrainConfig):
+    def __init__(self, mcfg: ModelConfig, tcfg: TrainConfig, mesh=None, donate: bool = False):
         self.mcfg, self.tcfg = mcfg, tcfg
         self.model = MemoryPoolLM(mcfg)
-        self.optimizer = make_optimizer(tcfg)
-        self.train_step = jax.jit(self._train_step, static_argnames=("route", "nopool", "freeze"))
+        self.sparse = mcfg.use_memory and tcfg.sparse_pool_updates
+        self.schedule = make_schedule(tcfg)
+        self.optimizer = make_optimizer(tcfg, clip=not self.sparse)
+        self.mesh = mesh
+        extra = {}
+        if mesh is not None:
+            from jax.sharding import NamedSharding, PartitionSpec
+
+            self.replicated = NamedSharding(mesh, PartitionSpec())
+            self.batch_sharding = NamedSharding(mesh, PartitionSpec("data"))
+            extra = {"out_shardings": self.replicated}
+        self.train_step = jax.jit(
+            self._train_step,
+            static_argnames=("route", "nopool", "freeze"),
+            donate_argnums=(0,) if donate else (),
+            **extra,
+        )
         self.eval_step = jax.jit(self._eval_step)
-        self.revive = jax.jit(self._revive)
+        self.revive = jax.jit(self._revive, **extra)
+
+    # ------------------------------------------------------------ placement
+    def place_state(self, state):
+        return jax.device_put(state, self.replicated) if self.mesh is not None else state
+
+    def place_batch(self, batch):
+        if self.mesh is None:
+            return batch
+        return jax.device_put(batch, self.batch_sharding)
 
     # ------------------------------------------------------------------ init
     def init(self, rng: jax.Array) -> TrainState:
         dummy = jnp.zeros((1, self.mcfg.max_len), jnp.int32)
         params = self.model.init({"params": rng}, dummy)["params"]
         m = self.mcfg
+        if self.sparse:
+            values, rest = split_values(params)
+            opt_state = self.optimizer.init(rest)
+            pool_m, pool_v = jnp.zeros_like(values), jnp.zeros_like(values)
+        else:
+            opt_state = self.optimizer.init(params)
+            # two distinct arrays: donating one buffer twice is an error
+            pool_m, pool_v = jnp.zeros((0,)), jnp.zeros((0,))
         return TrainState(
             step=jnp.zeros((), jnp.int32),
             params=params,
-            opt_state=self.optimizer.init(params),
+            opt_state=opt_state,
             subkey_usage=jnp.full((m.pool_heads, 2, m.n_sub_keys), 1.0 / m.n_sub_keys),
             slot_usage=jnp.full((m.pool_size,), 1.0 / m.pool_size),
+            pool_m=pool_m,
+            pool_v=pool_v,
         )
 
     # ------------------------------------------------------------------ loss
-    def _loss(self, params, batch, rng, train: bool, route: bool = False, nopool: bool = False):
+    def _loss(self, params, batch, rng, train: bool, route: bool = False, nopool: bool = False,
+              probes=None):
         r_route, r_drop = jax.random.split(rng)
         logits, aux = self.model.apply(
             {"params": params},
             batch["inputs"],
             train=train,
             route_through_pool=train and route,
+            sparse_grad=probes is not None,
+            probes=probes,
             rngs={"routing": r_route, "dropout": r_drop},
         )
         ce = optax.softmax_cross_entropy_with_integer_labels(logits, batch["targets"])
@@ -186,16 +267,57 @@ class Trainer:
         if nopool is None:
             nopool = t.nopool_kl_coef > 0 or t.nopool_true_coef > 0
         r_loss, r_sample = jax.random.split(rng)
-        grad_fn = jax.value_and_grad(self._loss, has_aux=True)
-        (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool)
-        updates, opt_state = self.optimizer.update(grads, state.opt_state, state.params)
-        if freeze:
-            # Stage 2: backbone frozen; only the pool path (pool, router,
-            # read gate/projection) keeps learning.
-            updates = jax.tree_util.tree_map_with_path(
-                lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
-        params = optax.apply_updates(state.params, updates)
-        metrics["grad_norm"] = optax.tree.norm(grads)
+        pool_m, pool_v = state.pool_m, state.pool_v
+
+        if self.sparse:
+            values, rest = split_values(state.params)
+            B, T = batch["inputs"].shape
+            layers = sorted(self.mcfg.memory_layers)
+            probes = {i: jnp.zeros((B, T, self.mcfg.d_value)) for i in layers}
+
+            def loss_fn(rest, probes):
+                return self._loss(merge_values(rest, values), batch, r_loss, True, route, nopool,
+                                  probes=probes)
+
+            (_, (metrics, aux)), (g_rest, g_probe) = jax.value_and_grad(
+                loss_fn, argnums=(0, 1), has_aux=True)(rest, probes)
+            uniq, g_rows = fetched_row_grads(aux, g_probe, layers, self.mcfg.pool_size)
+
+            # clip by the global norm of both parts together
+            gnorm = jnp.sqrt(optax.tree.norm(g_rest) ** 2 + jnp.sum(g_rows**2))
+            scale = jnp.minimum(1.0, t.grad_clip / (gnorm + 1e-6))
+            g_rest = jax.tree_util.tree_map(lambda g: g * scale, g_rest)
+            g_rows = g_rows * scale
+
+            updates, opt_state = self.optimizer.update(g_rest, state.opt_state, rest)
+            if freeze:
+                updates = jax.tree_util.tree_map_with_path(
+                    lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
+            rest = optax.apply_updates(rest, updates)
+
+            # lazy Adam on the fetched rows only
+            n = (state.step + 1).astype(jnp.float32)
+            lr = self.schedule(state.step) * t.pool_lr_mult
+            m_rows = ADAM_B1 * jnp.take(pool_m, uniq, axis=0, mode="fill", fill_value=0) + (1 - ADAM_B1) * g_rows
+            v_rows = ADAM_B2 * jnp.take(pool_v, uniq, axis=0, mode="fill", fill_value=0) + (1 - ADAM_B2) * g_rows**2
+            step_rows = -lr * (m_rows / (1 - ADAM_B1**n)) / (jnp.sqrt(v_rows / (1 - ADAM_B2**n)) + ADAM_EPS)
+            values = values.at[uniq].add(step_rows, mode="drop")
+            pool_m = pool_m.at[uniq].set(m_rows, mode="drop")
+            pool_v = pool_v.at[uniq].set(v_rows, mode="drop")
+            params = merge_values(rest, values)
+            metrics["grad_norm"] = gnorm
+            metrics["rows_updated"] = jnp.sum(uniq < self.mcfg.pool_size)
+        else:
+            grad_fn = jax.value_and_grad(self._loss, has_aux=True)
+            (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool)
+            updates, opt_state = self.optimizer.update(grads, state.opt_state, state.params)
+            if freeze:
+                # Stage 2: backbone frozen; only the pool path (pool, router,
+                # read gate/projection) keeps learning.
+                updates = jax.tree_util.tree_map_with_path(
+                    lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
+            params = optax.apply_updates(state.params, updates)
+            metrics["grad_norm"] = optax.tree.norm(grads)
 
         subkey_usage, slot_usage = state.subkey_usage, state.slot_usage
         queries = jnp.zeros((0,))
@@ -222,6 +344,8 @@ class Trainer:
             opt_state=opt_state,
             subkey_usage=subkey_usage,
             slot_usage=slot_usage,
+            pool_m=pool_m,
+            pool_v=pool_v,
         )
         return new_state, metrics, queries
 
@@ -239,9 +363,10 @@ class Trainer:
 
         # Clear Adam moments of revived keys so stale momentum can't drag
         # them straight back to where they died.
+        tree = split_values(params)[1] if self.sparse else params
         mask = jax.tree_util.tree_map_with_path(
             lambda p, x: dead[..., None] if _path_is(p, "pool", "sub_keys") else jnp.zeros((), bool),
-            params,
+            tree,
         )
         opt_state = optax.tree_utils.tree_map_params(
             self.optimizer,
@@ -286,27 +411,70 @@ def _fmt(metrics: Dict[str, Any]) -> str:
     return " ".join(f"{k}={float(v):.4g}" for k, v in metrics.items())
 
 
-def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = None, meta: Dict[str, Any] | None = None):
-    trainer = Trainer(mcfg, tcfg)
-    rng = jax.random.PRNGKey(tcfg.seed)
-    rng, init_rng = jax.random.split(rng)
+# ------------------------------------------------------------- checkpoints
+def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, history) -> None:
+    """Resumable checkpoint: full train state + data RNG + eval history.
+    Written to temp files and renamed, so a crash never leaves a torn file."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        f.write(serialization.to_bytes(jax.device_get(state)))
+    with open(path + ".json.tmp", "w") as f:
+        json.dump({"step": int(state.step), "np_rng": np_rng.bit_generator.state, "history": history}, f)
+    os.replace(path + ".tmp", path)
+    os.replace(path + ".json.tmp", path + ".json")
+
+
+def load_checkpoint(path: str, template: TrainState):
+    with open(path, "rb") as f:
+        state = serialization.from_bytes(template, f.read())
+    with open(path + ".json") as f:
+        meta = json.load(f)
+    np_rng = np.random.default_rng()
+    np_rng.bit_generator.state = meta["np_rng"]
+    return state, np_rng, meta["history"]
+
+
+def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = None,
+        meta: Dict[str, Any] | None = None, resume: bool = False, stop_after: int | None = None):
+    """Train. Checkpoints go to <save_path>.state; resume=True continues from
+    it exactly (per-step RNGs are derived from the step number).
+    stop_after simulates a preemption (used by tests)."""
+    mesh = None
+    if tcfg.data_parallel and jax.device_count() > 1:
+        from jax.sharding import Mesh
+
+        if tcfg.batch_size % jax.device_count():
+            raise ValueError("batch_size must be divisible by the number of devices")
+        mesh = Mesh(np.array(jax.devices()), ("data",))
+    trainer = Trainer(mcfg, tcfg, mesh=mesh, donate=True)
+    base_rng, init_rng = jax.random.split(jax.random.PRNGKey(tcfg.seed))
     state = trainer.init(init_rng)
     np_rng = np.random.default_rng(tcfg.seed)
+    history = []
+    ckpt = save_path + ".state" if save_path else None
+    if resume and ckpt and os.path.exists(ckpt):
+        state, np_rng, history = load_checkpoint(ckpt, state)
+        print(f"resumed from {ckpt} at step {int(state.step)}")
+    state = trainer.place_state(state)
+    start = int(state.step) + 1
 
     n_params = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
     n_pool = sum(x.size for x in jax.tree_util.tree_leaves(state.params.get("pool", {})))
     print(f"params: total={n_params:,} backbone={n_params - n_pool:,} pool={n_pool:,}")
     if mcfg.use_memory:
         print(f"pool: {mcfg.pool_size:,} slots x {mcfg.d_value} dims, "
-              f"{mcfg.pool_heads} heads x top-{mcfg.top_k}")
+              f"{mcfg.pool_heads} heads x top-{mcfg.top_k}, "
+              f"{'sparse' if trainer.sparse else 'dense'} pool updates")
+    if mesh is not None:
+        print(f"data parallel over {jax.device_count()} devices")
 
-    history = []
+    step_key, revive_key = jax.random.split(base_rng)
     t0 = time.time()
-    for step in range(1, tcfg.steps + 1):
-        rng, step_rng, revive_rng = jax.random.split(rng, 3)
-        batch = dataset.sample(np_rng, tcfg.batch_size)
+    for step in range(start, tcfg.steps + 1):
+        batch = trainer.place_batch(dataset.sample(np_rng, tcfg.batch_size))
         phase = phase_at(tcfg, step)
-        state, metrics, queries = trainer.train_step(state, batch, step_rng, **phase)
+        state, metrics, queries = trainer.train_step(
+            state, batch, jax.random.fold_in(step_key, step), **phase)
 
         revived = 0
         if (
@@ -315,10 +483,10 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
             and step % tcfg.revive_every == 0
             and step <= tcfg.revive_until * tcfg.steps
         ):
-            state, revived = trainer.revive(state, queries, revive_rng)
+            state, revived = trainer.revive(state, queries, jax.random.fold_in(revive_key, step))
             revived = int(revived)
 
-        if step % tcfg.log_every == 0 or step == 1:
+        if step % tcfg.log_every == 0 or step == start:
             msg = f"step {step:5d} | {_fmt(metrics)}"
             if revived:
                 msg += f" | revived_subkeys={revived}"
@@ -329,10 +497,17 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
             history.append({"step": step, **ev})
             print(f"  eval  {step:5d} | {_fmt(ev)}", flush=True)
 
+        if ckpt and ((tcfg.checkpoint_every and step % tcfg.checkpoint_every == 0)
+                     or step == stop_after):
+            save_checkpoint(ckpt, state, np_rng, history)
+        if step == stop_after:
+            print(f"stopping after step {step} (simulated preemption)")
+            return trainer, state, history
+
     if save_path:
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         with open(save_path, "wb") as f:
-            f.write(serialization.to_bytes(state.params))
+            f.write(serialization.to_bytes(jax.device_get(state.params)))
         with open(save_path + ".json", "w") as f:
             json.dump(
                 {
@@ -345,6 +520,7 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
                 f,
                 indent=2,
             )
+        save_checkpoint(ckpt, state, np_rng, history)
         print(f"saved params to {save_path}")
     return trainer, state, history
 
@@ -382,6 +558,7 @@ def main():
     parser.add_argument("--name_len", type=int, default=3)
     parser.add_argument("--data_seed", type=int, default=0)
     parser.add_argument("--save", type=str, default=None, help="path to save trained params")
+    parser.add_argument("--resume", action="store_true", help="continue from <save>.state if present")
     _add_dataclass_args(parser, ModelConfig)
     _add_dataclass_args(parser, TrainConfig)
     args = parser.parse_args()
@@ -405,7 +582,7 @@ def main():
         dataset = TextDataset(args.text_path, seq_len=seq_len)
         mcfg = _from_args(ModelConfig, args, vocab_size=256)
     tcfg = _from_args(TrainConfig, args)
-    run(mcfg, tcfg, dataset, save_path=args.save, meta=meta)
+    run(mcfg, tcfg, dataset, save_path=args.save, meta=meta, resume=args.resume)
 
 
 if __name__ == "__main__":

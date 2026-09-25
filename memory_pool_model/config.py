@@ -21,9 +21,10 @@ class ModelConfig:
     use_memory: bool = True
     # Backbone layers that read from the (single, shared) pool.
     memory_layers: Tuple[int, ...] = (1,)
-    # Keep the feed-forward block inside memory layers. False = the pool
-    # read replaces it (memory-layer style), removing a place to store facts.
-    memory_ffn: bool = True
+    # Keep the feed-forward block inside memory layers. False (default) = the
+    # pool read replaces it (memory-layer style), removing a place to store
+    # facts. Measured: backbone-alone accuracy 56% -> 23% on the fact task.
+    memory_ffn: bool = False
     # Product-key pool: the pool has n_sub_keys**2 trainable value slots.
     n_sub_keys: int = 64
     # Independent router heads; each head fetches `top_k` slots.
@@ -80,7 +81,9 @@ class TrainConfig:
     nopool_kl_coef: float = 0.0
     # Same extra pass, penalising -log(1 - p_correct): the backbone is only
     # punished for knowing the right answer by itself.
-    nopool_true_coef: float = 0.0
+    # Default 1.0: with memory_ffn=False this moved the fact task to 97.9%
+    # accuracy with the pool and 1.8% without it (knowledge in the pool).
+    nopool_true_coef: float = 1.0
     # Warm starts: switch the options above on only after this many steps
     # (0 = from the start, or never for the *_after_step switches).
     nopool_after_step: int = 0
@@ -88,6 +91,15 @@ class TrainConfig:
     # Two-stage training: after this step the backbone is frozen and only
     # the pool path (pool, router, read gate/projection) keeps learning.
     freeze_backbone_after_step: int = 0
+
+    # ---- scale ----
+    # Update only the pool rows fetched this step (lazy Adam). Gradient and
+    # optimizer work then scale with rows used, not with pool size.
+    sparse_pool_updates: bool = True
+    # Split each batch across all local devices (data parallel).
+    data_parallel: bool = False
+    # Save a resumable checkpoint every N steps (0 = only at the end).
+    checkpoint_every: int = 0
 
     seed: int = 0
     log_every: int = 100
