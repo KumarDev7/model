@@ -25,16 +25,48 @@ tokens ─► embed ─► [attn ─► FFN(small) ─┬─► + ] ─► ... �
                                   └─────────────────────────────────┘
 ```
 
+## The goal: thinking on the GPU, knowledge on the SSD
+
+The backbone that does the reasoning is small and stays on the GPU. The
+knowledge lives in the pool, which can be far larger than GPU memory and
+sit on an SSD. For each token the router picks `pool_heads * top_k` rows
+(64 by default) per memory layer, and only those rows are read:
+
+```
+token → backbone (GPU) → router → product keys (GPU) → 64 slot ids
+                                                        │  read 64 rows (fp16, 256 dims = 32 KB)
+                                                        ▼
+                                          pool values on SSD (memmap)
+```
+
+Three things make this work:
+
+1. **Knowledge must really be in the pool.** With the defaults
+   (`memory_ffn=False`, `nopool_true_coef=1.0`) the fact task reaches 97.9%
+   accuracy, and only 1.8% with the pool removed. The old recipe gave 99.7% / 56.1%:
+   the backbone had memorised half the facts itself.
+   See `experiments/results/reliance*/`.
+2. **The pool can live off the GPU.** `pool_location="host"` keeps the value
+   table in RAM, or on SSD with `pool_dir`. Training fetches only the rows a
+   step uses and updates them on the host with lazy Adam. Inference reads
+   64 rows per token per memory layer.
+3. **Updates touch only fetched rows** (`sparse_pool_updates`, default on).
+   Gradients are built for just those rows, and they are tested equal to
+   dense gradients.
+
 ## Layout
 
 | file | what |
 |---|---|
 | `memory_pool_model/memory.py` | `MemoryPool` (product-key top-k router + trainable values), `key_diversity_loss`, `revive_dead_keys` |
 | `memory_pool_model/model.py` | `MemoryPoolLM`: small causal transformer; chosen layers read from the one shared pool |
-| `memory_pool_model/train.py` | optimizer, train/eval steps, usage tracking, dead-key revival, CLI |
+| `memory_pool_model/train.py` | optimizer, train/eval steps, sparse pool updates, data parallel, checkpoints/resume, CLI |
+| `memory_pool_model/host_pool.py` | the pool kept off the GPU: host RAM or memory-mapped files on SSD |
+| `memory_pool_model/generate.py` | token-by-token generation with a KV cache |
 | `memory_pool_model/data.py` | synthetic knowledge-base task and byte-level text task |
 | `memory_pool_model/config.py` | `ModelConfig`, `TrainConfig` (every field is a CLI flag) |
-| `tests/` | correctness tests (exact top-k, collapse detection, revival, training) |
+| `tests/` | correctness tests (exact top-k, collapse, revival, sparse = dense gradients, data parallel, exact resume, host pool, decoding) |
+| `experiments/` | knowledge tests, pool-reliance study, scaling and SSD-inference benchmarks |
 
 ## How retrieval works
 
@@ -118,6 +150,31 @@ python -m pytest tests -q
 All `ModelConfig` / `TrainConfig` fields are CLI flags (`--top_k`,
 `--pool_heads`, `--balance_coef`, `--routing_noise`, `--revive_every 0` to
 disable revival, ...).
+
+### Scaling
+
+```bash
+# pool in host RAM (or on SSD with --pool_dir), backbone on the GPU
+python -m memory_pool_model.train --pool_location host --pool_dir /mnt/ssd/pool ...
+
+# all local GPUs, data parallel; resumable checkpoints every 500 steps
+python -m memory_pool_model.train --data_parallel true --checkpoint_every 500 --save ckpt/run --resume ...
+
+# benchmarks
+python -m experiments.scale_bench --n_sub 256 1024 2048            # step time / memory vs pool size
+python -m experiments.ssd_inference --n_sub 2048 --where gpu ram ssd_warm ssd_cold
+```
+
+For bit-exact GPU runs set `XLA_FLAGS=--xla_gpu_deterministic_ops=true`;
+otherwise GPU scatter-adds make runs differ in the last float bits.
+
+### Generating tokens
+
+```python
+from memory_pool_model.generate import Generator
+gen = Generator(mcfg, params)                    # works with device or host pools
+out = gen.generate(prompt_tokens, n_new=64)      # greedy; temperature=... to sample
+```
 
 ### Reading the retrieved slots
 
