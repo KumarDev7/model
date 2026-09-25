@@ -218,8 +218,11 @@ class Trainer:
             slot_hits = slot_counts if slot_hits is None else slot_hits + slot_counts
         out = {k: v / max(n, 1.0) for k, v in totals.items()}
         if self.mcfg.use_memory:
+            stats = usage_stats(slot_hits)
+            # fetched at least once / fetched >= 10% of a fair share / evenness
             out["pool_coverage"] = float(jnp.mean(slot_hits > 0))
-            out["pool_spread"] = float(usage_stats(slot_hits)["spread"])
+            out["pool_active"] = float(stats["active"])
+            out["pool_spread"] = float(stats["spread"])
         return out
 
 
