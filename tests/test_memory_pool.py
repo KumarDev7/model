@@ -195,3 +195,27 @@ def test_nopool_kl_trains_and_reports():
     state, metrics, _ = trainer.train_step(state, ds.sample(np.random.default_rng(0), 16), jax.random.PRNGKey(1))
     assert np.isfinite(float(metrics["nopool_kl"])) and "acc_nopool" in metrics
     assert "acc_nopool" in trainer.evaluate(state.params, ds, 16)
+
+
+def test_phases_switch_on_at_the_right_step():
+    from memory_pool_model.train import phase_at
+    t = TrainConfig(route_after_step=10, nopool_true_coef=1.0, nopool_after_step=5, freeze_backbone_after_step=20)
+    assert phase_at(t, 5) == {"route": False, "nopool": False, "freeze": False}
+    assert phase_at(t, 11) == {"route": True, "nopool": True, "freeze": False}
+    assert phase_at(t, 21)["freeze"]
+    assert phase_at(TrainConfig(), 100) == {"route": False, "nopool": False, "freeze": False}
+
+
+def test_freeze_trains_only_the_pool_path():
+    ds, trainer = _tiny_setup()
+    trainer.tcfg = TrainConfig(steps=5, batch_size=16, warmup_steps=1, nopool_true_coef=1.0)
+    state = trainer.init(jax.random.PRNGKey(0))
+    batch = ds.sample(np.random.default_rng(0), 16)
+    new = state
+    for i in range(3):  # lr is 0 on the first warmup step
+        new, metrics, _ = trainer.train_step(new, batch, jax.random.PRNGKey(i), route=False, nopool=True, freeze=True)
+    assert "nopool_true_pen" in metrics and np.isfinite(float(metrics["nopool_true_pen"]))
+    np.testing.assert_array_equal(new.params["attn_0"]["query"]["kernel"], state.params["attn_0"]["query"]["kernel"])
+    np.testing.assert_array_equal(new.params["embed"]["embedding"], state.params["embed"]["embedding"])
+    assert not np.array_equal(new.params["pool"]["values"], state.params["pool"]["values"])
+    assert not np.array_equal(new.params["router_1"]["kernel"], state.params["router_1"]["kernel"])

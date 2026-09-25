@@ -5,6 +5,7 @@ steps). "Pool dependence" = accuracy with the pool vs with it removed.
 
     KT_RESULTS=experiments/results/reliance python -m experiments.pool_reliance train --gpus 0,1 --per_gpu 3
     KT_RESULTS=experiments/results/reliance python -m experiments.pool_reliance analyze
+    (add --round 2 to both for the second set of recipes)
 """
 
 from __future__ import annotations
@@ -28,6 +29,17 @@ ARMS = {
     "noffn": ["--memory_ffn", "false"],
     "noffn_kl": ["--memory_ffn", "false", "--nopool_kl_coef", "1.0"],
     "noffn_kl_route": ["--memory_ffn", "false", "--nopool_kl_coef", "1.0", "--route_through_pool", "true"],
+}
+# Round 2: all without the memory-layer FFN (the round-1 winner).
+NOFFN = ["--memory_ffn", "false"]
+ARMS2 = {
+    "ptrue": NOFFN + ["--nopool_true_coef", "1.0"],
+    "warm_ptrue": NOFFN + ["--nopool_true_coef", "1.0", "--nopool_after_step", "1500"],
+    "warm_route": NOFFN + ["--route_after_step", "1500"],
+    "warm_route_ptrue": NOFFN + ["--route_after_step", "1500", "--nopool_true_coef", "1.0",
+                                 "--nopool_after_step", "1500"],
+    "freeze_1500": NOFFN + ["--freeze_backbone_after_step", "1500"],
+    "freeze_500": NOFFN + ["--freeze_backbone_after_step", "500"],
 }
 
 
@@ -56,7 +68,7 @@ def train(gpus, per_gpu, only):
                 del running[s]
 
 
-def analyze():
+def analyze(out_name="reliance.json"):
     out = []
     for arm in ARMS:
         if not os.path.exists(os.path.join(kt.CKPT, arm + ".msgpack.json")):
@@ -84,7 +96,7 @@ def analyze():
         }
         print({k: v for k, v in row.items() if k != "history"}, flush=True)
         out.append(row)
-    kt._save("reliance.json", out)
+    kt._save(out_name, out)
 
 
 if __name__ == "__main__":
@@ -93,8 +105,12 @@ if __name__ == "__main__":
     ap.add_argument("--gpus", default="0")
     ap.add_argument("--per_gpu", type=int, default=1)
     ap.add_argument("--only", nargs="*")
+    ap.add_argument("--round", type=int, default=1)
     a = ap.parse_args()
+    if a.round == 2:
+        ARMS.clear()
+        ARMS.update(ARMS2)
     if a.cmd == "train":
         train(a.gpus.split(","), a.per_gpu, a.only)
     else:
-        analyze()
+        analyze("reliance.json" if a.round == 1 else f"reliance{a.round}.json")

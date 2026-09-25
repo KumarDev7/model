@@ -39,6 +39,21 @@ class TrainState:
     slot_usage: jax.Array  # [N] EMA of slot selection frequency
 
 
+def phase_at(tcfg: TrainConfig, step: int) -> Dict[str, bool]:
+    """Which training options are active at this step."""
+    return {
+        "route": tcfg.route_through_pool or 0 < tcfg.route_after_step < step,
+        "nopool": (tcfg.nopool_kl_coef > 0 or tcfg.nopool_true_coef > 0)
+        and step > tcfg.nopool_after_step,
+        "freeze": 0 < tcfg.freeze_backbone_after_step < step,
+    }
+
+
+def _is_pool_path(path) -> bool:
+    top = getattr(path[0], "key", "")
+    return top == "pool" or top.startswith(("router_", "mem_gate_", "mem_out_"))
+
+
 def _path_is(path, *names) -> bool:
     keys = [getattr(p, "key", None) for p in path]
     return keys[: len(names)] == list(names)
@@ -88,7 +103,7 @@ class Trainer:
         self.mcfg, self.tcfg = mcfg, tcfg
         self.model = MemoryPoolLM(mcfg)
         self.optimizer = make_optimizer(tcfg)
-        self.train_step = jax.jit(self._train_step)
+        self.train_step = jax.jit(self._train_step, static_argnames=("route", "nopool", "freeze"))
         self.eval_step = jax.jit(self._eval_step)
         self.revive = jax.jit(self._revive)
 
@@ -106,13 +121,13 @@ class Trainer:
         )
 
     # ------------------------------------------------------------------ loss
-    def _loss(self, params, batch, rng, train: bool):
+    def _loss(self, params, batch, rng, train: bool, route: bool = False, nopool: bool = False):
         r_route, r_drop = jax.random.split(rng)
         logits, aux = self.model.apply(
             {"params": params},
             batch["inputs"],
             train=train,
-            route_through_pool=train and self.tcfg.route_through_pool,
+            route_through_pool=train and route,
             rngs={"routing": r_route, "dropout": r_drop},
         )
         ce = optax.softmax_cross_entropy_with_integer_labels(logits, batch["targets"])
@@ -132,7 +147,7 @@ class Trainer:
                 key_diversity=div,
                 temperature=aux["temperature"],
             )
-        use_nopool = self.mcfg.use_memory and (not train or self.tcfg.nopool_kl_coef > 0)
+        use_nopool = self.mcfg.use_memory and (not train or nopool)
         if use_nopool:
             # Same model with the pool switched off: how much can the
             # backbone answer by itself?
@@ -149,15 +164,36 @@ class Trainer:
                 kl = (kl * mask).sum() / denom
                 loss = loss + self.tcfg.nopool_kl_coef * kl
                 metrics["nopool_kl"] = kl
+                # -log(1 - p_correct) with the pool off: only punishes the
+                # backbone for putting mass on the right answer by itself.
+                p_true = jnp.take_along_axis(
+                    jax.nn.softmax(logits_np, -1), batch["targets"][..., None], -1)[..., 0]
+                pen = -jnp.log(jnp.clip(1.0 - p_true, 1e-6, 1.0))
+                pen = (pen * mask).sum() / denom
+                loss = loss + self.tcfg.nopool_true_coef * pen
+                metrics["nopool_true_pen"] = pen
         metrics["loss"] = loss
         return loss, (metrics, aux)
 
     # ------------------------------------------------------------ train step
-    def _train_step(self, state: TrainState, batch, rng):
+    def _train_step(self, state: TrainState, batch, rng, route=None, nopool=None, freeze=False):
+        """route / nopool / freeze are static: the trainer passes the phase
+        for each step explicitly, so switching phases recompiles instead of
+        silently keeping the first trace."""
+        t = self.tcfg
+        if route is None:
+            route = t.route_through_pool
+        if nopool is None:
+            nopool = t.nopool_kl_coef > 0 or t.nopool_true_coef > 0
         r_loss, r_sample = jax.random.split(rng)
         grad_fn = jax.value_and_grad(self._loss, has_aux=True)
-        (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True)
+        (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool)
         updates, opt_state = self.optimizer.update(grads, state.opt_state, state.params)
+        if freeze:
+            # Stage 2: backbone frozen; only the pool path (pool, router,
+            # read gate/projection) keeps learning.
+            updates = jax.tree_util.tree_map_with_path(
+                lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
         params = optax.apply_updates(state.params, updates)
         metrics["grad_norm"] = optax.tree.norm(grads)
 
@@ -269,7 +305,8 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
     for step in range(1, tcfg.steps + 1):
         rng, step_rng, revive_rng = jax.random.split(rng, 3)
         batch = dataset.sample(np_rng, tcfg.batch_size)
-        state, metrics, queries = trainer.train_step(state, batch, step_rng)
+        phase = phase_at(tcfg, step)
+        state, metrics, queries = trainer.train_step(state, batch, step_rng, **phase)
 
         revived = 0
         if (

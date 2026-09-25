@@ -78,6 +78,16 @@ class TrainConfig:
     # Extra pass with the pool switched off: push that prediction toward
     # uniform on scored tokens, so the backbone can't answer on its own.
     nopool_kl_coef: float = 0.0
+    # Same extra pass, penalising -log(1 - p_correct): the backbone is only
+    # punished for knowing the right answer by itself.
+    nopool_true_coef: float = 0.0
+    # Warm starts: switch the options above on only after this many steps
+    # (0 = from the start, or never for the *_after_step switches).
+    nopool_after_step: int = 0
+    route_after_step: int = 0
+    # Two-stage training: after this step the backbone is frozen and only
+    # the pool path (pool, router, read gate/projection) keeps learning.
+    freeze_backbone_after_step: int = 0
 
     seed: int = 0
     log_every: int = 100
