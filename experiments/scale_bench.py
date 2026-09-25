@@ -51,7 +51,8 @@ peak = max((d.memory_stats() or {}).get("peak_bytes_in_use", 0) for d in devices
 print("RESULT " + json.dumps({**cfg, "step_ms": dt * 1e3, "tokens_per_s": cfg["batch"] * cfg["seq"] / dt,
       "peak_gb": peak / 1e9, "pool_slots": cfg["n_sub"] ** 2,
       "loss": float(m["loss"]), "rows_updated": int(m.get("rows_updated", -1)),
-      "host_pool_gb": tr.host.nbytes() / 1e9 if tr.host else 0.0}), flush=True)
+      "host_pool_gb": tr.host.nbytes() / 1e9 if tr.host else 0.0,
+      "host_timing_s": getattr(tr, "host_timing", None)}), flush=True)
 """
 
 

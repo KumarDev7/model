@@ -13,6 +13,7 @@ device memory.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Dict, Optional
 
@@ -46,6 +47,7 @@ class HostPool:
                 "HostPool needs JAX's CPU backend for its host callback; include it, "
                 "e.g. JAX_PLATFORMS=cuda,cpu") from e
         self.n_slots, self.dim, self.path = n_slots, dim, path
+        self._gather_s = 0.0
         self.trainable = trainable
         self.name = name or f"pool-{uuid.uuid4().hex[:8]}"
         self.values = self._array("values", dtype, init=True, seed=seed)
@@ -79,8 +81,15 @@ class HostPool:
 
     # ---------------------------------------------------------------- reads
     def gather(self, idx: np.ndarray) -> np.ndarray:
+        t = time.perf_counter()
         idx = np.clip(np.asarray(idx).astype(np.int64), 0, self.n_slots - 1)
-        return np.asarray(self.values[idx], dtype=np.float32)
+        out = np.asarray(self.values[idx], dtype=np.float32)
+        self._gather_s += time.perf_counter() - t
+        return out
+
+    def pop_gather_seconds(self) -> float:
+        s, self._gather_s = self._gather_s, 0.0
+        return s
 
     # --------------------------------------------------------------- update
     def adam_update(self, uniq: np.ndarray, grads: np.ndarray, step: int, lr: float) -> None:

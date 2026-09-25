@@ -185,10 +185,19 @@ class Trainer:
         """One optimisation step. With a host pool, the fetched rows' Adam
         update runs on the host right after the device step."""
         lr = float(self.schedule(int(state.step))) * self.tcfg.pool_lr_mult if self.host else 0.0
+        t0 = time.perf_counter()
         state, metrics, queries = self._jit_step(state, batch, rng, route=route, nopool=nopool, freeze=freeze)
         if self.host is not None:
             uniq, rows = metrics.pop("_pool_slots"), metrics.pop("_pool_grads")
-            self.host.adam_update(np.asarray(uniq), np.asarray(rows), int(state.step), lr)
+            uniq, rows = jax.block_until_ready((uniq, rows))
+            t1 = time.perf_counter()
+            uniq, rows = np.asarray(uniq), np.asarray(rows)
+            t2 = time.perf_counter()
+            self.host.adam_update(uniq, rows, int(state.step), lr)
+            t3 = time.perf_counter()
+            # seconds spent per part of the last step (profiling host pools)
+            self.host_timing = {"device_step": t1 - t0, "to_host": t2 - t1, "host_adam": t3 - t2,
+                                "gather": self.host.pop_gather_seconds()}
         return state, metrics, queries
 
     # ------------------------------------------------------------ placement
