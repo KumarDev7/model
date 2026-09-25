@@ -54,6 +54,27 @@ Three things make this work:
    Gradients are built for just those rows, and they are tested equal to
    dense gradients.
 
+## Validated on 2x NVIDIA T4
+
+All numbers from `experiments/results/final/gpu_validation.json` and
+`experiments/results/reliance2/`. Test suite: 27/27 on CPU and on GPU.
+
+| Check | Result |
+|---|---|
+| Knowledge in the pool (fact task, 16,384 facts) | **99.8%** accuracy; **0.01%** with the pool removed (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad) |
+| Sparse pool gradients | equal to dense gradients (test); only fetched rows change |
+| Pool bigger than GPU memory, training | 4.2M rows in host RAM: 2.25 s/step, 2.5 GB GPU, 4.3 GB RAM (on-GPU version runs out of memory) |
+| Same accuracy with the pool off the GPU | 98.3% host pool vs 97.9% device pool (same recipe, Adam) |
+| Data parallel, 2 GPUs | 22.0k vs 13.7k tokens/s (1.6x), 1.7 vs 3.1 GB per GPU, same loss |
+| Preemption | 2-GPU text run killed at step 1,750, resumed from step 1,500, finished; bit-exact resume in tests |
+| Inference, pool on SSD | 67M rows (34 GB, larger than the 31 GB RAM): **5.4 ms/token** cold, 4.4 ms warm; pool on GPU: 2.3 ms |
+| End to end | trained Shakespeare model (1.9M backbone + 67M pool) generates **identical text** with its pool read from SSD (8.1 ms/token) |
+
+Known limits: host-pool training is ~8x slower per step than an on-GPU
+pool (host row updates and transfers); host pool + data parallel is not
+supported yet; no mixed precision (T4 lacks bf16); the Shakespeare model
+overfits the 1 MB corpus after step 2,000.
+
 ## Layout
 
 | file | what |
