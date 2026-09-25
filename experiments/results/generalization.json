@@ -1,0 +1,200 @@
+{
+  "entities_train": 1638,
+  "entities_test": 410,
+  "exception_rate": 0.10009765625,
+  "steps": 3000,
+  "models": {
+    "memory": {
+      "final": {
+        "memorised": {
+          "accuracy": 1.0,
+          "confidence": 0.9995933771133423,
+          "confident_wrong": 0.0,
+          "n": 4914
+        },
+        "paraphrase_seen": {
+          "accuracy": 1.0,
+          "confidence": 0.9995379447937012,
+          "confident_wrong": 0.0,
+          "n": 2457
+        },
+        "paraphrase_transfer": {
+          "accuracy": 1.0,
+          "confidence": 0.9995073676109314,
+          "confident_wrong": 0.0,
+          "n": 2457
+        },
+        "rule_unseen_entities": {
+          "accuracy": 0.9177718832891246,
+          "confidence": 0.9633153080940247,
+          "confident_wrong": 0.07957559681697612,
+          "n": 377
+        },
+        "exceptions_memorised": {
+          "accuracy": 1.0,
+          "confidence": 0.9993513226509094,
+          "confident_wrong": 0.0,
+          "n": 172
+        },
+        "unknowable": {
+          "accuracy": 0.0032520325203252032,
+          "confidence": 0.6657319664955139,
+          "confident_wrong": 0.7138211382113822,
+          "n": 1230
+        }
+      },
+      "curve": [
+        {
+          "step": 500,
+          "memorised": 0.3797313797313797,
+          "paraphrase_seen": 0.38095238095238093,
+          "paraphrase_transfer": 0.36385836385836384,
+          "rule_unseen_entities": 0.9416445623342176,
+          "exceptions_memorised": 0.21511627906976744,
+          "unknowable": 0.004878048780487805
+        },
+        {
+          "step": 1000,
+          "memorised": 0.9658119658119658,
+          "paraphrase_seen": 0.9658119658119658,
+          "paraphrase_transfer": 0.9621489621489622,
+          "rule_unseen_entities": 0.896551724137931,
+          "exceptions_memorised": 0.9244186046511628,
+          "unknowable": 0.0065040650406504065
+        },
+        {
+          "step": 1500,
+          "memorised": 0.9987789987789988,
+          "paraphrase_seen": 0.9983719983719984,
+          "paraphrase_transfer": 0.9991859991859992,
+          "rule_unseen_entities": 0.896551724137931,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0032520325203252032
+        },
+        {
+          "step": 2000,
+          "memorised": 1.0,
+          "paraphrase_seen": 0.9995929995929996,
+          "paraphrase_transfer": 1.0,
+          "rule_unseen_entities": 0.9230769230769231,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0032520325203252032
+        },
+        {
+          "step": 2500,
+          "memorised": 0.9997964997964998,
+          "paraphrase_seen": 0.9995929995929996,
+          "paraphrase_transfer": 1.0,
+          "rule_unseen_entities": 0.9151193633952255,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0024390243902439024
+        },
+        {
+          "step": 3000,
+          "memorised": 1.0,
+          "paraphrase_seen": 1.0,
+          "paraphrase_transfer": 1.0,
+          "rule_unseen_entities": 0.9177718832891246,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0032520325203252032
+        }
+      ]
+    },
+    "dense_matched": {
+      "final": {
+        "memorised": {
+          "accuracy": 1.0,
+          "confidence": 0.9998851418495178,
+          "confident_wrong": 0.0,
+          "n": 4914
+        },
+        "paraphrase_seen": {
+          "accuracy": 1.0,
+          "confidence": 0.9998905062675476,
+          "confident_wrong": 0.0,
+          "n": 2457
+        },
+        "paraphrase_transfer": {
+          "accuracy": 1.0,
+          "confidence": 0.9998497366905212,
+          "confident_wrong": 0.0,
+          "n": 2457
+        },
+        "rule_unseen_entities": {
+          "accuracy": 0.9575596816976127,
+          "confidence": 0.9642180800437927,
+          "confident_wrong": 0.034482758620689655,
+          "n": 377
+        },
+        "exceptions_memorised": {
+          "accuracy": 1.0,
+          "confidence": 0.9997823238372803,
+          "confident_wrong": 0.0,
+          "n": 172
+        },
+        "unknowable": {
+          "accuracy": 0.0016260162601626016,
+          "confidence": 0.5810818672180176,
+          "confident_wrong": 0.5658536585365853,
+          "n": 1230
+        }
+      },
+      "curve": [
+        {
+          "step": 500,
+          "memorised": 0.9741554741554742,
+          "paraphrase_seen": 0.9686609686609686,
+          "paraphrase_transfer": 0.9682539682539683,
+          "rule_unseen_entities": 0.9045092838196287,
+          "exceptions_memorised": 0.5232558139534884,
+          "unknowable": 0.0016260162601626016
+        },
+        {
+          "step": 1000,
+          "memorised": 0.9993894993894994,
+          "paraphrase_seen": 1.0,
+          "paraphrase_transfer": 0.9987789987789988,
+          "rule_unseen_entities": 0.9071618037135278,
+          "exceptions_memorised": 0.9941860465116279,
+          "unknowable": 0.0016260162601626016
+        },
+        {
+          "step": 1500,
+          "memorised": 0.9997964997964998,
+          "paraphrase_seen": 1.0,
+          "paraphrase_transfer": 0.9995929995929996,
+          "rule_unseen_entities": 0.9416445623342176,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0040650406504065045
+        },
+        {
+          "step": 2000,
+          "memorised": 1.0,
+          "paraphrase_seen": 1.0,
+          "paraphrase_transfer": 1.0,
+          "rule_unseen_entities": 0.9575596816976127,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0016260162601626016
+        },
+        {
+          "step": 2500,
+          "memorised": 1.0,
+          "paraphrase_seen": 1.0,
+          "paraphrase_transfer": 1.0,
+          "rule_unseen_entities": 0.9575596816976127,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0016260162601626016
+        },
+        {
+          "step": 3000,
+          "memorised": 1.0,
+          "paraphrase_seen": 1.0,
+          "paraphrase_transfer": 1.0,
+          "rule_unseen_entities": 0.9575596816976127,
+          "exceptions_memorised": 1.0,
+          "unknowable": 0.0016260162601626016
+        }
+      ]
+    }
+  }
+}

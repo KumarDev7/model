@@ -132,6 +132,7 @@ footer { color: var(--muted); font-size: 13px; }
     <div class="eyebrow">JAX memory-pool LM · knowledge tests</div>
     <h1>How much does the memory pool actually know?</h1>
     <p id="lede"></p>
+    <p class="answer" id="verdict"></p>
     <div class="tiles" id="tiles"></div>
   </header>
 
@@ -388,12 +389,13 @@ function render() {
   const acc = A.accuracy.top1;
   const noPool = A.random_ablation.find(r => r.fraction_deleted === 1).accuracy;
   const use = A.pool_usage_on_facts;
-  $("lede").innerHTML = `A small transformer (309k parameters) reads from one trainable pool of <strong>${num(A.pool_size)} vectors</strong>. It was trained on <strong>${num(A.num_facts)} made-up facts</strong> of the form <code>entity + relation → attribute</code>, then tested six ways: accuracy, capacity, how facts are spread over vectors, deleting vectors, and adding new facts later.`;
+  $("lede").innerHTML = `A small transformer (309k parameters) reads from one trainable pool of <strong>${num(A.pool_size)} vectors</strong>. It was trained on <strong>${num(A.num_facts)} made-up facts</strong> of the form <code>entity + relation → attribute</code>, then tested seven ways: accuracy, capacity, how many vectors one fact uses, how facts share vectors, deleting vectors, adding new facts later, and generalization.`;
+  $("verdict").innerHTML = ANSWERS.verdict();
   $("tiles").innerHTML = [
     ["Fact accuracy", pct(acc), `${num(A.accuracy.facts_correct)} of ${num(A.num_facts)} facts correct`],
-    ["Without the pool", pct(noPool), "same model, every pool vector zeroed"],
+    ["Dense model, same size", pct(D.find(r => r.name === "dense_matched").accuracy), "no pool, wider feed-forward layers"],
     ["Pool vectors in use", pct(use.active_10pct_of_fair_share), `get ≥10% of a fair share of fetches`],
-    ["Vectors per token", String(A.fetch_per_token), `out of ${num(A.pool_size)} (${pct(A.fetch_per_token / A.pool_size)})`],
+    ["Without the pool", pct(noPool), "same model, every pool vector zeroed"],
   ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join("");
 
   // ---- test 1

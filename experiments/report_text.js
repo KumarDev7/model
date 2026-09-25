@@ -1,18 +1,19 @@
 const ANSWERS = {
   acc: ({ acc, dm, ds, per, conf }) =>
-    `<strong>Yes.</strong> The memory-pool model gets <strong>${pct(acc)}</strong> of the ${num(A.num_facts)} facts right, and ${pct(conf)} are right with more than 90% confidence. ` +
-    `The same backbone without a pool reaches ${pct(ds.accuracy)}. A dense model with about the same total parameter count (the pool's parameters moved into a wider feed-forward layer) reaches ${pct(dm.accuracy)}. ` +
-    `Accuracy is even across the four relations (${per.map(v => pct(v)).join(", ")}).`,
+    `<strong>It answers correctly, but on this task the pool doesn't beat a dense model of the same size.</strong> ` +
+    `The memory-pool model gets <strong>${pct(acc)}</strong> of the ${num(A.num_facts)} facts right (${pct(conf)} with more than 90% confidence). ` +
+    `A dense model with about the same parameter count (${num(dm.params)} vs ${num(D.find(r => r.name === "main").params)}) gets <strong>${pct(dm.accuracy)}</strong>, and got there faster. ` +
+    `Even the small backbone alone (${num(ds.params)} parameters, no pool) reaches ${pct(ds.accuracy)}. ` +
+    `At 16,384 facts this task is too small to separate the designs; the capacity test below pushes harder.`,
 
   cap: (C) => {
+    const top = C.at(-1);
     const rows = C.filter(r => r.memory_accuracy != null);
-    const best = rows.reduce((a, r) => (r.memory_facts_stored > a.memory_facts_stored ? r : a), rows[0]);
-    const dBest = C.filter(r => r.dense_accuracy != null).reduce((a, r) => (r.dense_facts_stored > a.dense_facts_stored ? r : a));
-    const pool = best.pool_size;
-    return `A pool of <strong>${num(pool)} vectors</strong> stored up to <strong>${num(best.memory_facts_stored)} facts</strong> (${(best.memory_facts_stored / pool).toFixed(1)} facts per vector, at ${num(best.facts)} facts to learn). ` +
-      `The backbone alone topped out at ${num(dBest.dense_facts_stored)} facts. ` +
-      rows.map(r => `${num(r.facts)} facts → ${pct(r.memory_accuracy)}`).join(", ") + ". " +
-      `Each run had a fixed training budget, so the largest settings may still be under-trained rather than full.`;
+    return `A pool of <strong>${num(top.pool_size)} vectors</strong> stores every fact up to ${num(16384)} facts (16 per vector): ` +
+      rows.map(r => `${num(r.facts)} → ${pct(r.memory_accuracy)}`).join(", ") + `. ` +
+      `The backbone alone keeps up until then (${pct(C.find(r => r.facts === 16384).dense_accuracy)} at ${num(16384)}). ` +
+      `At ${num(top.facts)} facts both run out of room within this training budget, but the pool model stores <strong>${num(top.memory_facts_stored)}</strong> facts against <strong>${num(top.dense_facts_stored)}</strong> for the backbone alone (+${pct(top.memory_facts_stored / top.dense_facts_stored - 1, 0)}). ` +
+      `The backbone-only model is smaller, though, and no same-size dense model was run at this point, so this shows extra capacity, not better capacity per parameter.`;
   },
 
   merge: (tk, mx) => {
@@ -57,14 +58,11 @@ const ANSWERS = {
 
   ret: (R) => {
     const last = (k) => R.curves[k]?.at(-1), atA = (k) => R.curves[k]?.filter(p => p.step <= R.steps_A).at(-1);
-    const parts = [
-      ["memory/full", "the pool model (training everything)"],
-      ["memory/pool_values_only", "the pool model (training only pool vectors)"],
-      ["dense_matched/full", "the dense model"],
-    ].filter(([k]) => R.curves[k]).map(([k, n]) =>
-      `${n} keeps <strong>${pct(last(k).acc_A)}</strong> of the old facts (was ${pct(atA(k).acc_A)}) and learns ${pct(last(k).acc_B)} of the new ones`);
-    return `Each model first learned ${num(R.facts_A)} facts (set A), then trained only on ${num(R.facts_B)} new facts (set B) for ${num(R.steps_B)} steps. After that, ` +
-      parts.join("; ") + `.`;
+    const f = last("memory/full"), po = last("memory/pool_values_only"), dn = last("dense_matched/full");
+    return `<strong>This is where the pool helps most.</strong> Each model first learned ${num(R.facts_A)} facts (set A, 100% correct), then trained only on ${num(R.facts_B)} new facts (set B) for ${num(R.steps_B)} steps. ` +
+      `Training every weight wipes out almost all the old facts, with or without a pool: the pool model keeps ${pct(f.acc_A)} and the dense model ${pct(dn.acc_A)}. ` +
+      `Training <strong>only the pool vectors</strong> (backbone and router frozen) learns the new facts just as well (${pct(po.acc_B)}) and keeps <strong>${pct(po.acc_A)}</strong> of the old ones. ` +
+      `That's much better, but not forgetting-free: adding knowledge safely still needs replay of old facts or reserved empty vectors.`;
   },
 };
 
@@ -76,7 +74,15 @@ ANSWERS.gen = (G) => {
     `<strong>Rule on entities never seen</strong>: ${row("rule_unseen_entities")}. ` +
     `Rule-breaking exceptions remembered: ${row("exceptions_memorised")}. ` +
     `On facts it can't know (unseen entities, random relations) accuracy is ${row("unknowable")} against 0.4% chance, and the model is still over 50% confident but wrong ${pct(m.unknowable.confident_wrong)} of the time` +
-    (d ? ` (dense ${pct(d.unknowable.confident_wrong)})` : "") + `.`;
+    (d ? ` (dense ${pct(d.unknowable.confident_wrong)})` : "") + `. ` +
+    `So both models generalize: a fact learned in one wording works in another, and the rule carries over to new entities. The pool model is a little weaker on the rule and more often confidently wrong about things it can't know.`;
+};
+
+ANSWERS.verdict = () => {
+  const dm = D.find(r => r.name === "dense_matched"), top = C.at(-1), po = R.curves["memory/pool_values_only"].at(-1), dn = R.curves["dense_matched/full"].at(-1);
+  return `<strong>Bottom line.</strong> The pool trains without collapsing (${pct(A.pool_usage_on_facts.active_10pct_of_fair_share)} of vectors get a fair share), reaches ${pct(A.accuracy.top1)} accuracy, and one vector can hold many different facts without errors. ` +
+    `But at this scale a dense model of the same size is just as accurate (${pct(dm.accuracy)}) and learns faster. ` +
+    `The pool's clear wins are extra capacity (${num(top.memory_facts_stored)} vs ${num(top.dense_facts_stored)} facts stored at the limit) and adding new facts by training only the pool (${pct(po.acc_A)} of old facts kept vs ${pct(dn.acc_A)}).`;
 };
 
 const SETUP = [

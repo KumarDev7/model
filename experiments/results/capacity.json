@@ -1,0 +1,190 @@
+[
+  {
+    "facts": 4096,
+    "memory_accuracy": 1.0,
+    "memory_facts_stored": 4096,
+    "pool_size": 1024,
+    "facts_per_vector": 4.0,
+    "pool_coverage": 1.0,
+    "pool_active": 1.0,
+    "history": [
+      {
+        "step": 1000,
+        "ce": 0.031026019132696092,
+        "acc": 0.9938964992761612,
+        "pool_coverage": 1.0,
+        "pool_active": 0.9990234375,
+        "pool_spread": 0.8593943119049072
+      },
+      {
+        "step": 2000,
+        "ce": 0.0004289001208235277,
+        "acc": 1.0,
+        "pool_coverage": 1.0,
+        "pool_active": 0.9990234375,
+        "pool_spread": 0.882842481136322
+      },
+      {
+        "step": 3000,
+        "ce": 0.00017282366934523452,
+        "acc": 1.0,
+        "pool_coverage": 1.0,
+        "pool_active": 0.9990234375,
+        "pool_spread": 0.8739174008369446
+      }
+    ],
+    "dense_accuracy": 1.0,
+    "dense_facts_stored": 4096
+  },
+  {
+    "facts": 8192,
+    "memory_accuracy": 1.0,
+    "memory_facts_stored": 8192,
+    "pool_size": 1024,
+    "facts_per_vector": 8.0,
+    "pool_coverage": 1.0,
+    "pool_active": 1.0,
+    "history": [
+      {
+        "step": 1000,
+        "ce": 0.1699521765112877,
+        "acc": 0.9581298874691129,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.8475449085235596
+      },
+      {
+        "step": 2000,
+        "ce": 0.003487447007501032,
+        "acc": 0.9995117262005806,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.8863722085952759
+      },
+      {
+        "step": 3000,
+        "ce": 0.0005073617226116767,
+        "acc": 1.0,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.8856096267700195
+      },
+      {
+        "step": 3500,
+        "ce": 0.0004120725225220667,
+        "acc": 1.0,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.8848413825035095
+      }
+    ],
+    "dense_accuracy": 0.9998779296875,
+    "dense_facts_stored": 8191
+  },
+  {
+    "facts": 16384,
+    "memory_accuracy": 0.99969482421875,
+    "memory_facts_stored": 16379,
+    "pool_size": 1024,
+    "facts_per_vector": 16.0,
+    "pool_coverage": 1.0,
+    "pool_active": 1.0,
+    "history": [
+      {
+        "step": 1000,
+        "ce": 4.425375863909721,
+        "acc": 0.12341308558825403,
+        "pool_coverage": 1.0,
+        "pool_active": 0.966796875,
+        "pool_spread": 0.6568381786346436
+      },
+      {
+        "step": 2000,
+        "ce": 0.5864108540117741,
+        "acc": 0.8546752943657339,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.7230472564697266
+      },
+      {
+        "step": 3000,
+        "ce": 0.0866239236202091,
+        "acc": 0.9805297856219113,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.7348216772079468
+      },
+      {
+        "step": 4000,
+        "ce": 0.006356938731187256,
+        "acc": 0.9993286211974919,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.7538666129112244
+      },
+      {
+        "step": 5000,
+        "ce": 0.0031128716036619153,
+        "acc": 0.9996948288753629,
+        "pool_coverage": 1.0,
+        "pool_active": 1.0,
+        "pool_spread": 0.7640266418457031
+      }
+    ],
+    "dense_accuracy": 0.9951171875,
+    "dense_facts_stored": 16304
+  },
+  {
+    "facts": 32768,
+    "memory_accuracy": 0.4912109375,
+    "memory_facts_stored": 16096,
+    "pool_size": 1024,
+    "facts_per_vector": 32.0,
+    "pool_coverage": 1.0,
+    "pool_active": 0.9921875,
+    "history": [
+      {
+        "step": 1000,
+        "ce": 5.508086483925581,
+        "acc": 0.008789062585037755,
+        "pool_coverage": 1.0,
+        "pool_active": 0.986328125,
+        "pool_spread": 0.7840217351913452
+      },
+      {
+        "step": 2000,
+        "ce": 4.899079166352749,
+        "acc": 0.06359863292891532,
+        "pool_coverage": 1.0,
+        "pool_active": 0.9677734375,
+        "pool_spread": 0.680594265460968
+      },
+      {
+        "step": 3000,
+        "ce": 3.4695242773741484,
+        "acc": 0.2583618151838891,
+        "pool_coverage": 1.0,
+        "pool_active": 0.9599609375,
+        "pool_spread": 0.591363251209259
+      },
+      {
+        "step": 4000,
+        "ce": 2.665050438605249,
+        "acc": 0.4085693365195766,
+        "pool_coverage": 1.0,
+        "pool_active": 0.974609375,
+        "pool_spread": 0.6319218277931213
+      },
+      {
+        "step": 5000,
+        "ce": 2.307071428745985,
+        "acc": 0.49121093563735485,
+        "pool_coverage": 1.0,
+        "pool_active": 0.9609375,
+        "pool_spread": 0.6731213331222534
+      }
+    ],
+    "dense_accuracy": 0.34619140625,
+    "dense_facts_stored": 11344
+  }
+]
