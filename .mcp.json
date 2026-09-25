@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "relayfs": {
+      "command": "relayfs",
+      "args": [
+        "--mode",
+        "mcp",
+        "--base-url",
+        "wss://opencode.theorionic.com",
+        "--id",
+        "omp-bridge"
+      ]
+    }
+  }
+}
