@@ -3,4 +3,4 @@ __pycache__/
 .pytest_cache/
 checkpoints/
 experiments/results/ckpt/
-experiments/results/*.log
+experiments/results/**/*.log
