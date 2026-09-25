@@ -27,7 +27,8 @@ mcfg = ModelConfig(vocab_size=256, max_len=cfg["seq"], d_model=cfg["d_model"], n
                    n_heads=8, memory_layers=tuple(cfg["memory_layers"]), memory_ffn=False,
                    n_sub_keys=cfg["n_sub"], pool_heads=4, d_key=128, d_value=cfg["d_value"], top_k=16,
                    pool_location=cfg.get("location", "device"), pool_dir=cfg.get("pool_dir", ""))
-tcfg = TrainConfig(steps=1000, batch_size=cfg["batch"], sparse_pool_updates=cfg["mode"] == "sparse")
+tcfg = TrainConfig(steps=1000, batch_size=cfg["batch"], sparse_pool_updates=cfg["mode"] == "sparse",
+                   pool_optimizer=cfg.get("pool_optimizer", "adam"))
 mesh = None
 if n_dev > 1:
     from jax.sharding import Mesh
@@ -83,6 +84,7 @@ def main():
     ap.add_argument("--memory_layers", default="1,3")
     ap.add_argument("--steps", type=int, default=20)
     ap.add_argument("--location", default="device", choices=["device", "host"])
+    ap.add_argument("--pool_optimizer", default="adam", choices=["adam", "rowwise_adagrad"])
     ap.add_argument("--pool_dir", default="", help="host pool on SSD under this dir (empty = RAM)")
     ap.add_argument("--out", default="experiments/results/scale_bench.json")
     a = ap.parse_args()
@@ -93,7 +95,7 @@ def main():
                 cfg = dict(n_sub=n_sub, mode=mode, devices=dev, batch=a.batch, seq=a.seq, d_model=a.d_model,
                            d_value=a.d_value, layers=a.layers,
                            memory_layers=[int(x) for x in a.memory_layers.split(",")], steps=a.steps,
-                           location=a.location,
+                           location=a.location, pool_optimizer=a.pool_optimizer,
                            pool_dir=os.path.join(a.pool_dir, f"train_n{n_sub}") if a.pool_dir else "")
                 t = time.time()
                 res = run_one(cfg)

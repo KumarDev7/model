@@ -155,7 +155,8 @@ class Trainer:
                 raise ValueError("pool_location='host' requires sparse_pool_updates")
             if mesh is not None:
                 raise NotImplementedError("host pool with data parallel is not supported yet")
-            self.host = HostPool(mcfg.pool_size, mcfg.d_value, path=mcfg.pool_dir or None, seed=tcfg.seed)
+            self.host = HostPool(mcfg.pool_size, mcfg.d_value, path=mcfg.pool_dir or None, seed=tcfg.seed,
+                                 optimizer=tcfg.pool_optimizer)
             mcfg = dataclasses.replace(mcfg, host_pool=self.host.name)
         elif mcfg.pool_location != "device":
             raise ValueError(f"unknown pool_location {mcfg.pool_location!r}")
@@ -193,7 +194,7 @@ class Trainer:
             t1 = time.perf_counter()
             uniq, rows = np.asarray(uniq), np.asarray(rows)
             t2 = time.perf_counter()
-            self.host.adam_update(uniq, rows, int(state.step), lr)
+            self.host.update(uniq, rows, int(state.step), lr)
             t3 = time.perf_counter()
             # seconds spent per part of the last step (profiling host pools)
             self.host_timing = {"device_step": t1 - t0, "to_host": t2 - t1, "host_adam": t3 - t2,
@@ -217,8 +218,10 @@ class Trainer:
         if self.sparse:
             values, rest = split_values(params)
             opt_state = self.optimizer.init(rest)
-            if values is None:  # host pool keeps its own moments
+            if values is None:  # host pool keeps its own optimizer state
                 pool_m, pool_v = jnp.zeros((0,)), jnp.zeros((0,))
+            elif self.tcfg.pool_optimizer == "rowwise_adagrad":
+                pool_m, pool_v = jnp.zeros((0,)), jnp.zeros((values.shape[0],))
             else:
                 pool_m, pool_v = jnp.zeros_like(values), jnp.zeros_like(values)
         else:
@@ -335,6 +338,11 @@ class Trainer:
             if values is None:
                 # host pool: the trainer applies lazy Adam on the host
                 metrics["_pool_slots"], metrics["_pool_grads"] = uniq, g_rows
+            elif t.pool_optimizer == "rowwise_adagrad":
+                lr = self.schedule(state.step) * t.pool_lr_mult
+                acc = jnp.take(pool_v, uniq, mode="fill", fill_value=0) + jnp.mean(g_rows**2, axis=-1)
+                values = values.at[uniq].add(-(lr / (jnp.sqrt(acc) + 1e-8))[:, None] * g_rows, mode="drop")
+                pool_v = pool_v.at[uniq].set(acc, mode="drop")
             else:
                 # lazy Adam on the fetched rows only
                 n = (state.step + 1).astype(jnp.float32)

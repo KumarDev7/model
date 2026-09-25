@@ -347,19 +347,21 @@ def test_data_parallel_matches_single_device():
 
 
 # ---- pool off the accelerator (host RAM / SSD) ----
-def _host_pair(tmp_path=None):
+def _host_pair(tmp_path=None, pool_optimizer="adam"):
     ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
     base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
                 n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4)
-    tcfg = TrainConfig(steps=24, batch_size=16, warmup_steps=5, revive_every=5, log_every=100, eval_every=100)
+    tcfg = TrainConfig(steps=24, batch_size=16, warmup_steps=5, revive_every=5, log_every=100, eval_every=100,
+                       pool_optimizer=pool_optimizer)
     dev = Trainer(ModelConfig(**base), tcfg)
     host = Trainer(ModelConfig(**base, pool_location="host",
                                pool_dir=str(tmp_path / "pool") if tmp_path else ""), tcfg)
     return ds, tcfg, dev, host
 
 
-def test_host_pool_training_matches_device_pool():
-    ds, _, dev, host = _host_pair()
+@pytest.mark.parametrize("pool_optimizer", ["adam", "rowwise_adagrad"])
+def test_host_pool_training_matches_device_pool(pool_optimizer):
+    ds, _, dev, host = _host_pair(pool_optimizer=pool_optimizer)
     s_dev = dev.init(jax.random.PRNGKey(0))
     s_host = host.init(jax.random.PRNGKey(0))
     assert "values" not in s_host.params["pool"]
@@ -410,3 +412,14 @@ def test_kv_cache_decoding_matches_full_forward(location):
     res = Generator(cfg, params, batch_size=2).generate(np.asarray(toks), n_new=3)
     np.testing.assert_allclose(res["logits"][:, :12], np.asarray(full), atol=1e-4)
     assert res["tokens"].shape == (2, 3)
+
+
+def test_rowwise_adagrad_state_is_one_float_per_row():
+    from memory_pool_model.host_pool import HostPool
+    hp = HostPool(1000, 64, optimizer="rowwise_adagrad")
+    assert hp.m is None and hp.v is None and hp.acc.shape == (1000,)
+    assert hp.nbytes() == 1000 * 64 * 4 + 1000 * 4  # table + one float per row
+    before = hp.values.copy()
+    hp.update(np.array([3, 7, 1000]), np.ones((3, 64), np.float32), step=1, lr=0.1)  # 1000 = padding
+    changed = np.flatnonzero(np.any(hp.values != before, axis=1))
+    assert changed.tolist() == [3, 7] and hp.acc[3] == 1.0

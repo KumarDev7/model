@@ -102,6 +102,10 @@ class TrainConfig:
     # Update only the pool rows fetched this step (lazy Adam). Gradient and
     # optimizer work then scale with rows used, not with pool size.
     sparse_pool_updates: bool = True
+    # Optimizer for the pool values: "adam" (2 moments per value, 3x the
+    # table) or "rowwise_adagrad" (1 float per row, ~1x; standard for very
+    # large embedding tables). Needs sparse_pool_updates.
+    pool_optimizer: str = "adam"
     # Split each batch across all local devices (data parallel).
     data_parallel: bool = False
     # Save a resumable checkpoint every N steps (0 = only at the end).
