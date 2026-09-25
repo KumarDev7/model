@@ -112,6 +112,7 @@ class Trainer:
             {"params": params},
             batch["inputs"],
             train=train,
+            route_through_pool=train and self.tcfg.route_through_pool,
             rngs={"routing": r_route, "dropout": r_drop},
         )
         ce = optax.softmax_cross_entropy_with_integer_labels(logits, batch["targets"])
@@ -131,6 +132,23 @@ class Trainer:
                 key_diversity=div,
                 temperature=aux["temperature"],
             )
+        use_nopool = self.mcfg.use_memory and (not train or self.tcfg.nopool_kl_coef > 0)
+        if use_nopool:
+            # Same model with the pool switched off: how much can the
+            # backbone answer by itself?
+            logits_np, _ = self.model.apply(
+                {"params": params}, batch["inputs"], train=train, pool_off=True,
+                rngs={"dropout": r_drop},
+            )
+            metrics["acc_nopool"] = ((logits_np.argmax(-1) == batch["targets"]) * mask).sum() / denom
+            if train:
+                # KL(uniform || p_nopool) on scored tokens: 0 when the backbone
+                # alone has no idea, large when it knows the answer.
+                logp = jax.nn.log_softmax(logits_np, -1)
+                kl = -jnp.log(logp.shape[-1]) - logp.mean(-1)
+                kl = (kl * mask).sum() / denom
+                loss = loss + self.tcfg.nopool_kl_coef * kl
+                metrics["nopool_kl"] = kl
         metrics["loss"] = loss
         return loss, (metrics, aux)
 
@@ -207,6 +225,8 @@ class Trainer:
 
     def evaluate(self, params, dataset, batch_size: int) -> Dict[str, float]:
         totals = {"ce": 0.0, "acc": 0.0}
+        if self.mcfg.use_memory:
+            totals["acc_nopool"] = 0.0
         n = 0.0
         slot_hits = None
         for batch in dataset.eval_batches(batch_size):

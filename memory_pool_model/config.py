@@ -21,6 +21,9 @@ class ModelConfig:
     use_memory: bool = True
     # Backbone layers that read from the (single, shared) pool.
     memory_layers: Tuple[int, ...] = (1,)
+    # Keep the feed-forward block inside memory layers. False = the pool
+    # read replaces it (memory-layer style), removing a place to store facts.
+    memory_ffn: bool = True
     # Product-key pool: the pool has n_sub_keys**2 trainable value slots.
     n_sub_keys: int = 64
     # Independent router heads; each head fetches `top_k` slots.
@@ -67,6 +70,14 @@ class TrainConfig:
     revive_threshold: float = 0.1
     # Stop reviving after this fraction of training so the pool can settle.
     revive_until: float = 0.8
+
+    # ---- make the pool, not the backbone, carry the knowledge ----
+    # Block answer-loss gradients through the residual/FFN path of memory
+    # layers; earlier backbone weights learn only via the router -> pool read.
+    route_through_pool: bool = False
+    # Extra pass with the pool switched off: push that prediction toward
+    # uniform on scored tokens, so the backbone can't answer on its own.
+    nopool_kl_coef: float = 0.0
 
     seed: int = 0
     log_every: int = 100

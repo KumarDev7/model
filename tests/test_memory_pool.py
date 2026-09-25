@@ -145,3 +145,53 @@ def test_eval_batches_cover_every_fact_once():
     ds = FactDataset(num_entities=37, num_relations=3, facts_per_seq=4)
     total = sum(b["mask"].sum() for b in ds.eval_batches(5))
     assert total == ds.num_facts
+
+
+# ---- options that make the pool carry the knowledge ----
+def _tiny_model(**kw):
+    from memory_pool_model.model import MemoryPoolLM
+    cfg = ModelConfig(vocab_size=40, max_len=12, d_model=32, n_heads=2, n_sub_keys=8,
+                      pool_heads=2, d_key=16, d_value=32, top_k=4, **kw)
+    model = MemoryPoolLM(cfg)
+    tokens = jax.random.randint(jax.random.PRNGKey(0), (2, 12), 0, 40)
+    params = model.init(jax.random.PRNGKey(1), tokens)["params"]
+    return model, params, tokens
+
+
+def test_memory_layer_without_ffn():
+    _, params, _ = _tiny_model(memory_ffn=False)
+    assert "ffn_in_0" in params and "ffn_in_1" not in params  # layer 1 is the memory layer
+
+
+def test_route_through_pool_blocks_backbone_shortcut():
+    model, params, tokens = _tiny_model()
+
+    def grads(route, pool_off=False):
+        f = lambda p: model.apply({"params": p}, tokens, route_through_pool=route, pool_off=pool_off)[0].sum()
+        return jax.grad(f)(params)
+
+    g = grads(True)
+    # FFN inside the memory layer is cut off from the loss...
+    assert float(jnp.abs(g["ffn_in_1"]["kernel"]).sum()) == 0.0
+    # ...earlier layers still learn, but only through the router/pool read
+    assert float(jnp.abs(g["attn_0"]["query"]["kernel"]).sum()) > 0.0
+    assert float(jnp.abs(g["router_1"]["kernel"]).sum()) > 0.0
+    # without the pool path there is nothing left to carry gradient to them
+    model_np = lambda p: model.apply({"params": p}, tokens, route_through_pool=True, pool_off=True)[0].sum()
+    g_np = jax.grad(model_np)(params)
+    assert float(jnp.abs(g_np["attn_0"]["query"]["kernel"]).sum()) == 0.0
+    # forward values are unchanged by gradient routing
+    a = model.apply({"params": params}, tokens)[0]
+    b = model.apply({"params": params}, tokens, route_through_pool=True)[0]
+    np.testing.assert_allclose(a, b, rtol=1e-6)
+
+
+def test_nopool_kl_trains_and_reports():
+    ds, trainer = _tiny_setup()
+    trainer.tcfg = TrainConfig(steps=5, batch_size=16, warmup_steps=1, nopool_kl_coef=1.0,
+                               route_through_pool=True)
+    trainer.train_step = jax.jit(trainer._train_step)
+    state = trainer.init(jax.random.PRNGKey(0))
+    state, metrics, _ = trainer.train_step(state, ds.sample(np.random.default_rng(0), 16), jax.random.PRNGKey(1))
+    assert np.isfinite(float(metrics["nopool_kl"])) and "acc_nopool" in metrics
+    assert "acc_nopool" in trainer.evaluate(state.params, ds, 16)

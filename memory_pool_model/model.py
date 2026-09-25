@@ -25,8 +25,20 @@ class MemoryPoolLM(nn.Module):
 
     @nn.compact
     def __call__(
-        self, tokens: jax.Array, *, train: bool = False
+        self,
+        tokens: jax.Array,
+        *,
+        train: bool = False,
+        pool_off: bool = False,
+        route_through_pool: bool = False,
     ) -> Tuple[jax.Array, Dict[str, Any]]:
+        """
+        pool_off: skip the memory read (the backbone answers alone).
+        route_through_pool: in memory layers, block gradients through the
+          residual/FFN path, so the loss can reach earlier backbone weights
+          only through the router -> pool read. The backbone can still learn
+          how to query the pool, but not store answers itself.
+        """
         cfg = self.cfg
         B, T = tokens.shape
         embed = nn.Embed(cfg.vocab_size, cfg.d_model, name="embed")
@@ -61,17 +73,23 @@ class MemoryPoolLM(nn.Module):
             x = x + h
 
             h = nn.LayerNorm(name=f"ln_ffn_{i}")(x)
-            y = nn.Dense(cfg.d_model * cfg.ffn_mult, name=f"ffn_in_{i}")(h)
-            y = nn.Dense(cfg.d_model, name=f"ffn_out_{i}")(nn.gelu(y))
+            is_mem_layer = pool is not None and i in cfg.memory_layers
+            y = jnp.zeros_like(x)
+            if not is_mem_layer or cfg.memory_ffn:
+                y = nn.Dense(cfg.d_model * cfg.ffn_mult, name=f"ffn_in_{i}")(h)
+                y = nn.Dense(cfg.d_model, name=f"ffn_out_{i}")(nn.gelu(y))
 
-            if pool is not None and i in cfg.memory_layers:
-                # Router: hidden state -> one query per pool head.
-                q = nn.Dense(cfg.pool_heads * cfg.d_key, name=f"router_{i}")(h)
-                q = q.reshape(B, T, cfg.pool_heads, cfg.d_key)
-                mem, aux = pool(q, train=train)
-                gate = nn.silu(nn.Dense(cfg.d_value, name=f"mem_gate_{i}")(h))
-                y = y + nn.Dense(cfg.d_model, name=f"mem_out_{i}")(mem * gate)
-                layer_aux.append(aux)
+            if is_mem_layer:
+                if route_through_pool:
+                    x, y = jax.lax.stop_gradient(x), jax.lax.stop_gradient(y)
+                if not pool_off:
+                    # Router: hidden state -> one query per pool head.
+                    q = nn.Dense(cfg.pool_heads * cfg.d_key, name=f"router_{i}")(h)
+                    q = q.reshape(B, T, cfg.pool_heads, cfg.d_key)
+                    mem, aux = pool(q, train=train)
+                    gate = nn.silu(nn.Dense(cfg.d_value, name=f"mem_gate_{i}")(h))
+                    y = y + nn.Dense(cfg.d_model, name=f"mem_out_{i}")(mem * gate)
+                    layer_aux.append(aux)
 
             y = nn.Dropout(cfg.dropout, deterministic=not train)(y)
             x = x + y
