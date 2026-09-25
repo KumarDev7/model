@@ -1,0 +1,29 @@
+name: Memory Pool Model Tests
+on:
+  push:
+    paths:
+      - "memory_pool_model/**"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/memory-pool-tests.yml"
+  pull_request:
+    paths:
+      - "memory_pool_model/**"
+      - "tests/**"
+      - "requirements.txt"
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install "jax[cpu]" -r requirements.txt
+      - name: Tests
+        run: python -m pytest tests -v
+      - name: Training smoke run
+        run: python -m memory_pool_model.train --steps 20 --log_every 10 --eval_every 20 --num_entities 256 --revive_every 10
