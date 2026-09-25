@@ -63,13 +63,16 @@ def _path_is(path, *names) -> bool:
 
 
 def split_values(params):
-    """(values, rest): the pool value table and every other parameter."""
+    """(values, rest): the pool value table and every other parameter.
+    values is None when the table lives off-device (host pool)."""
     pool = dict(params["pool"])
-    values = pool.pop("values")
+    values = pool.pop("values", None)
     return values, {**params, "pool": pool}
 
 
 def merge_values(rest, values):
+    if values is None:
+        return rest
     return {**rest, "pool": {**rest["pool"], "values": values}}
 
 
@@ -144,6 +147,18 @@ def fetched_row_grads(aux, probe_grads, layers, pool_size):
 
 class Trainer:
     def __init__(self, mcfg: ModelConfig, tcfg: TrainConfig, mesh=None, donate: bool = False):
+        self.host = None
+        if mcfg.use_memory and mcfg.pool_location == "host":
+            from .host_pool import HostPool
+
+            if not tcfg.sparse_pool_updates:
+                raise ValueError("pool_location='host' requires sparse_pool_updates")
+            if mesh is not None:
+                raise NotImplementedError("host pool with data parallel is not supported yet")
+            self.host = HostPool(mcfg.pool_size, mcfg.d_value, path=mcfg.pool_dir or None, seed=tcfg.seed)
+            mcfg = dataclasses.replace(mcfg, host_pool=self.host.name)
+        elif mcfg.pool_location != "device":
+            raise ValueError(f"unknown pool_location {mcfg.pool_location!r}")
         self.mcfg, self.tcfg = mcfg, tcfg
         self.model = MemoryPoolLM(mcfg)
         self.sparse = mcfg.use_memory and tcfg.sparse_pool_updates
@@ -157,7 +172,7 @@ class Trainer:
             self.replicated = NamedSharding(mesh, PartitionSpec())
             self.batch_sharding = NamedSharding(mesh, PartitionSpec("data"))
             extra = {"out_shardings": self.replicated}
-        self.train_step = jax.jit(
+        self._jit_step = jax.jit(
             self._train_step,
             static_argnames=("route", "nopool", "freeze"),
             donate_argnums=(0,) if donate else (),
@@ -165,6 +180,16 @@ class Trainer:
         )
         self.eval_step = jax.jit(self._eval_step)
         self.revive = jax.jit(self._revive, **extra)
+
+    def train_step(self, state, batch, rng, route=None, nopool=None, freeze=False):
+        """One optimisation step. With a host pool, the fetched rows' Adam
+        update runs on the host right after the device step."""
+        lr = float(self.schedule(int(state.step))) * self.tcfg.pool_lr_mult if self.host else 0.0
+        state, metrics, queries = self._jit_step(state, batch, rng, route=route, nopool=nopool, freeze=freeze)
+        if self.host is not None:
+            uniq, rows = metrics.pop("_pool_slots"), metrics.pop("_pool_grads")
+            self.host.adam_update(np.asarray(uniq), np.asarray(rows), int(state.step), lr)
+        return state, metrics, queries
 
     # ------------------------------------------------------------ placement
     def place_state(self, state):
@@ -183,7 +208,10 @@ class Trainer:
         if self.sparse:
             values, rest = split_values(params)
             opt_state = self.optimizer.init(rest)
-            pool_m, pool_v = jnp.zeros_like(values), jnp.zeros_like(values)
+            if values is None:  # host pool keeps its own moments
+                pool_m, pool_v = jnp.zeros((0,)), jnp.zeros((0,))
+            else:
+                pool_m, pool_v = jnp.zeros_like(values), jnp.zeros_like(values)
         else:
             opt_state = self.optimizer.init(params)
             # two distinct arrays: donating one buffer twice is an error
@@ -295,15 +323,19 @@ class Trainer:
                     lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
             rest = optax.apply_updates(rest, updates)
 
-            # lazy Adam on the fetched rows only
-            n = (state.step + 1).astype(jnp.float32)
-            lr = self.schedule(state.step) * t.pool_lr_mult
-            m_rows = ADAM_B1 * jnp.take(pool_m, uniq, axis=0, mode="fill", fill_value=0) + (1 - ADAM_B1) * g_rows
-            v_rows = ADAM_B2 * jnp.take(pool_v, uniq, axis=0, mode="fill", fill_value=0) + (1 - ADAM_B2) * g_rows**2
-            step_rows = -lr * (m_rows / (1 - ADAM_B1**n)) / (jnp.sqrt(v_rows / (1 - ADAM_B2**n)) + ADAM_EPS)
-            values = values.at[uniq].add(step_rows, mode="drop")
-            pool_m = pool_m.at[uniq].set(m_rows, mode="drop")
-            pool_v = pool_v.at[uniq].set(v_rows, mode="drop")
+            if values is None:
+                # host pool: the trainer applies lazy Adam on the host
+                metrics["_pool_slots"], metrics["_pool_grads"] = uniq, g_rows
+            else:
+                # lazy Adam on the fetched rows only
+                n = (state.step + 1).astype(jnp.float32)
+                lr = self.schedule(state.step) * t.pool_lr_mult
+                m_rows = ADAM_B1 * jnp.take(pool_m, uniq, axis=0, mode="fill", fill_value=0) + (1 - ADAM_B1) * g_rows
+                v_rows = ADAM_B2 * jnp.take(pool_v, uniq, axis=0, mode="fill", fill_value=0) + (1 - ADAM_B2) * g_rows**2
+                step_rows = -lr * (m_rows / (1 - ADAM_B1**n)) / (jnp.sqrt(v_rows / (1 - ADAM_B2**n)) + ADAM_EPS)
+                values = values.at[uniq].add(step_rows, mode="drop")
+                pool_m = pool_m.at[uniq].set(m_rows, mode="drop")
+                pool_v = pool_v.at[uniq].set(v_rows, mode="drop")
             params = merge_values(rest, values)
             metrics["grad_norm"] = gnorm
             metrics["rows_updated"] = jnp.sum(uniq < self.mcfg.pool_size)
@@ -412,10 +444,13 @@ def _fmt(metrics: Dict[str, Any]) -> str:
 
 
 # ------------------------------------------------------------- checkpoints
-def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, history) -> None:
-    """Resumable checkpoint: full train state + data RNG + eval history.
-    Written to temp files and renamed, so a crash never leaves a torn file."""
+def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, history, host=None) -> None:
+    """Resumable checkpoint: full train state + data RNG + eval history
+    (+ a snapshot of a host pool). Written to temp files and renamed, so a
+    crash never leaves a torn file."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if host is not None:
+        host.save(path + ".pool")
     with open(path + ".tmp", "wb") as f:
         f.write(serialization.to_bytes(jax.device_get(state)))
     with open(path + ".json.tmp", "w") as f:
@@ -424,7 +459,9 @@ def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, h
     os.replace(path + ".json.tmp", path + ".json")
 
 
-def load_checkpoint(path: str, template: TrainState):
+def load_checkpoint(path: str, template: TrainState, host=None):
+    if host is not None:
+        host.load(path + ".pool")
     with open(path, "rb") as f:
         state = serialization.from_bytes(template, f.read())
     with open(path + ".json") as f:
@@ -453,7 +490,7 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
     history = []
     ckpt = save_path + ".state" if save_path else None
     if resume and ckpt and os.path.exists(ckpt):
-        state, np_rng, history = load_checkpoint(ckpt, state)
+        state, np_rng, history = load_checkpoint(ckpt, state, trainer.host)
         print(f"resumed from {ckpt} at step {int(state.step)}")
     state = trainer.place_state(state)
     start = int(state.step) + 1
@@ -461,6 +498,9 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
     n_params = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
     n_pool = sum(x.size for x in jax.tree_util.tree_leaves(state.params.get("pool", {})))
     print(f"params: total={n_params:,} backbone={n_params - n_pool:,} pool={n_pool:,}")
+    if trainer.host is not None:
+        where = trainer.host.path or "host RAM"
+        print(f"pool values on {where}: {trainer.host.nbytes() / 1e9:.2f} GB incl. Adam moments")
     if mcfg.use_memory:
         print(f"pool: {mcfg.pool_size:,} slots x {mcfg.d_value} dims, "
               f"{mcfg.pool_heads} heads x top-{mcfg.top_k}, "
@@ -499,7 +539,7 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
 
         if ckpt and ((tcfg.checkpoint_every and step % tcfg.checkpoint_every == 0)
                      or step == stop_after):
-            save_checkpoint(ckpt, state, np_rng, history)
+            save_checkpoint(ckpt, state, np_rng, history, trainer.host)
         if step == stop_after:
             print(f"stopping after step {step} (simulated preemption)")
             return trainer, state, history
@@ -520,7 +560,7 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
                 f,
                 indent=2,
             )
-        save_checkpoint(ckpt, state, np_rng, history)
+        save_checkpoint(ckpt, state, np_rng, history, trainer.host)
         print(f"saved params to {save_path}")
     return trainer, state, history
 

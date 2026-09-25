@@ -22,6 +22,8 @@ class MemoryPoolLM(nn.Module):
     """
 
     cfg: ModelConfig
+    # Autoregressive decoding with a KV cache (one token per call).
+    decode: bool = False
 
     @nn.compact
     def __call__(
@@ -33,6 +35,7 @@ class MemoryPoolLM(nn.Module):
         route_through_pool: bool = False,
         sparse_grad: bool = False,
         probes: Dict[int, jax.Array] | None = None,
+        positions: jax.Array | None = None,
     ) -> Tuple[jax.Array, Dict[str, Any]]:
         """
         pool_off: skip the memory read (the backbone answers alone).
@@ -50,8 +53,12 @@ class MemoryPoolLM(nn.Module):
         pos = self.param(
             "pos_embed", nn.initializers.normal(0.02), (cfg.max_len, cfg.d_model)
         )
-        x = embed(tokens) + pos[None, :T]
-        causal = nn.make_causal_mask(tokens)
+        if positions is None:
+            x = embed(tokens) + pos[None, :T]
+        else:
+            x = embed(tokens) + pos[positions][None]
+        # in decode mode the attention cache applies the causal mask itself
+        causal = None if self.decode else nn.make_causal_mask(tokens)
 
         pool = None
         if cfg.use_memory:
@@ -63,6 +70,7 @@ class MemoryPoolLM(nn.Module):
                 top_k=cfg.top_k,
                 routing_noise=cfg.routing_noise,
                 init_temperature=cfg.init_temperature,
+                host_pool=cfg.host_pool,
                 name="pool",
             )
 
@@ -73,6 +81,7 @@ class MemoryPoolLM(nn.Module):
                 num_heads=cfg.n_heads,
                 dropout_rate=cfg.dropout,
                 deterministic=not train,
+                decode=self.decode,
                 name=f"attn_{i}",
             )(h, h, mask=causal)
             x = x + h

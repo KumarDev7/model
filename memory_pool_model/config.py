@@ -25,6 +25,12 @@ class ModelConfig:
     # pool read replaces it (memory-layer style), removing a place to store
     # facts. Measured: backbone-alone accuracy 56% -> 23% on the fact task.
     memory_ffn: bool = False
+    # Where the value table lives: "device" (GPU/TPU memory) or "host"
+    # (host RAM, or memory-mapped files on SSD when pool_dir is set).
+    pool_location: str = "device"
+    pool_dir: str = ""
+    # Filled in by the Trainer: registry name of the HostPool (host mode).
+    host_pool: str = ""
     # Product-key pool: the pool has n_sub_keys**2 trainable value slots.
     n_sub_keys: int = 64
     # Independent router heads; each head fetches `top_k` slots.

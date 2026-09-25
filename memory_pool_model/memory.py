@@ -55,6 +55,9 @@ class MemoryPool(nn.Module):
     top_k: int
     routing_noise: float = 1.0
     init_temperature: float = 10.0
+    # Name of a registered host_pool.HostPool: the value table then lives in
+    # host RAM / on SSD and fetched rows are copied in (no "values" param).
+    host_pool: str = ""
 
     def setup(self):
         assert self.d_key % 2 == 0, "d_key must be even (split into two halves)"
@@ -66,11 +69,12 @@ class MemoryPool(nn.Module):
         )
         # The knowledge itself: one vector per slot, shared by all heads
         # and by every backbone layer that reads from the pool.
-        self.values = self.param(
-            "values",
-            nn.initializers.normal(stddev=self.d_value**-0.5),
-            (self.n_sub_keys**2, self.d_value),
-        )
+        if not self.host_pool:
+            self.values = self.param(
+                "values",
+                nn.initializers.normal(stddev=self.d_value**-0.5),
+                (self.n_sub_keys**2, self.d_value),
+            )
         self.log_temperature = self.param(
             "log_temperature",
             lambda _: jnp.log(jnp.asarray(self.init_temperature, jnp.float32)),
@@ -124,8 +128,13 @@ class MemoryPool(nn.Module):
 
         # Fetch and mix knowledge vectors; heads are summed.
         weights = jax.nn.softmax(slot_scores, axis=-1)
-        values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
-        fetched = jnp.take(values, slots, axis=0)  # [M, H, k, d_value]
+        if self.host_pool:
+            from . import host_pool as hp
+
+            fetched = hp.fetch(self.host_pool, slots, self.d_value)  # [M, H, k, d_value]
+        else:
+            values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
+            fetched = jnp.take(values, slots, axis=0)  # [M, H, k, d_value]
         out = jnp.einsum("mhk,mhkd->md", weights, fetched)
         out = out.reshape(*lead_shape, self.d_value)
 

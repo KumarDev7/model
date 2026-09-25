@@ -1,3 +1,5 @@
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -342,3 +344,69 @@ def test_data_parallel_matches_single_device():
            "JAX_PLATFORMS": "cpu"}
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=600)
     assert r.returncode == 0 and "OK" in r.stdout, r.stdout + r.stderr
+
+
+# ---- pool off the accelerator (host RAM / SSD) ----
+def _host_pair(tmp_path=None):
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4)
+    tcfg = TrainConfig(steps=24, batch_size=16, warmup_steps=5, revive_every=5, log_every=100, eval_every=100)
+    dev = Trainer(ModelConfig(**base), tcfg)
+    host = Trainer(ModelConfig(**base, pool_location="host",
+                               pool_dir=str(tmp_path / "pool") if tmp_path else ""), tcfg)
+    return ds, tcfg, dev, host
+
+
+def test_host_pool_training_matches_device_pool():
+    ds, _, dev, host = _host_pair()
+    s_dev = dev.init(jax.random.PRNGKey(0))
+    s_host = host.init(jax.random.PRNGKey(0))
+    assert "values" not in s_host.params["pool"]
+    host.host.values[:] = np.asarray(s_dev.params["pool"]["values"])  # same starting table
+    for name in ("attn_0", "router_1", "embed"):
+        chex_equal = jax.tree_util.tree_map(np.array_equal, s_dev.params[name], s_host.params[name])
+        assert all(jax.tree_util.tree_leaves(chex_equal))
+    rng = np.random.default_rng(0)
+    for i in range(6):
+        batch = ds.sample(rng, 16)
+        s_dev, m_dev, _ = dev.train_step(s_dev, batch, jax.random.PRNGKey(i))
+        s_host, m_host, _ = host.train_step(s_host, batch, jax.random.PRNGKey(i))
+        assert abs(float(m_dev["loss"]) - float(m_host["loss"])) < 1e-4
+    np.testing.assert_allclose(host.host.values, np.asarray(s_dev.params["pool"]["values"]), rtol=1e-4, atol=1e-5)
+    ev_dev, ev_host = dev.evaluate(s_dev.params, ds, 16), host.evaluate(s_host.params, ds, 16)
+    assert abs(ev_dev["ce"] - ev_host["ce"]) < 1e-3
+
+
+def test_ssd_pool_trains_and_resumes_exactly(tmp_path):
+    from memory_pool_model.train import run
+    ds, tcfg, _, _ = _host_pair()
+    base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4, pool_location="host")
+    tr_a, full, _ = run(ModelConfig(**base, pool_dir=str(tmp_path / "pa")), tcfg, ds, save_path=str(tmp_path / "a"))
+    assert isinstance(tr_a.host.values, np.memmap) and os.path.exists(tmp_path / "pa" / "values.npy")
+    run(ModelConfig(**base, pool_dir=str(tmp_path / "pb")), tcfg, ds, save_path=str(tmp_path / "b"), stop_after=11)
+    tr_b, resumed, _ = run(ModelConfig(**base, pool_dir=str(tmp_path / "pb")), tcfg, ds,
+                           save_path=str(tmp_path / "b"), resume=True)
+    np.testing.assert_array_equal(np.asarray(tr_a.host.values), np.asarray(tr_b.host.values))
+    for a, b in zip(jax.tree_util.tree_leaves(full.params), jax.tree_util.tree_leaves(resumed.params)):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+@pytest.mark.parametrize("location", ["device", "host"])
+def test_kv_cache_decoding_matches_full_forward(location):
+    from memory_pool_model.generate import Generator
+    from memory_pool_model.host_pool import HostPool
+    from memory_pool_model.model import MemoryPoolLM
+    cfg = ModelConfig(vocab_size=50, max_len=16, d_model=32, n_heads=2, n_sub_keys=8, pool_heads=2,
+                      d_key=16, d_value=32, top_k=4, memory_layers=(0, 1))
+    if location == "host":
+        hp = HostPool(cfg.pool_size, cfg.d_value, trainable=False, dtype=np.float16)
+        cfg = ModelConfig(**{**cfg.__dict__, "pool_location": "host", "host_pool": hp.name})
+    toks = jax.random.randint(jax.random.PRNGKey(0), (2, 12), 0, 50)
+    model = MemoryPoolLM(cfg)
+    params = model.init(jax.random.PRNGKey(1), toks)["params"]
+    full, _ = model.apply({"params": params}, toks)
+    res = Generator(cfg, params, batch_size=2).generate(np.asarray(toks), n_new=3)
+    np.testing.assert_allclose(res["logits"][:, :12], np.asarray(full), atol=1e-4)
+    assert res["tokens"].shape == (2, 3)
