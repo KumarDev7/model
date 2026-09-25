@@ -39,6 +39,12 @@ class HostPool:
 
     def __init__(self, n_slots: int, dim: int, path: Optional[str] = None,
                  trainable: bool = True, dtype=np.float32, seed: int = 0, name: Optional[str] = None):
+        try:  # rows cross via a host callback, which needs JAX's CPU backend
+            jax.devices("cpu")
+        except RuntimeError as e:
+            raise RuntimeError(
+                "HostPool needs JAX's CPU backend for its host callback; include it, "
+                "e.g. JAX_PLATFORMS=cuda,cpu") from e
         self.n_slots, self.dim, self.path = n_slots, dim, path
         self.trainable = trainable
         self.name = name or f"pool-{uuid.uuid4().hex[:8]}"
