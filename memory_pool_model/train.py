@@ -139,10 +139,50 @@ def fetched_row_grads(aux, probe_grads, layers, pool_size):
         contribs.append((w[..., None] * g.reshape(-1, 1, d)).reshape(-1, d))
         slots.append(sl.reshape(-1))
     slots, contribs = jnp.concatenate(slots), jnp.concatenate(contribs)
+    return _merge_rows(slots, contribs, pool_size)
+
+
+def _merge_rows(slots, contribs, pool_size):
+    """Sum contributions per distinct slot. Padding slots (== pool_size)
+    sort last and are dropped by the caller's scatters."""
     cap = min(slots.shape[0], pool_size)
     uniq, inv = jnp.unique(slots, size=cap, fill_value=pool_size, return_inverse=True)
     rows = jax.ops.segment_sum(contribs, inv.reshape(-1), num_segments=cap)
     return uniq, rows
+
+
+def fetched_row_grads_sharded(aux, probe_grads, layers, pool_size, mesh):
+    """Data-parallel version of fetched_row_grads.
+
+    Each device first merges its own fetches (no communication), then the
+    devices all-gather just their merged rows and merge once more, so every
+    device ends with the same (uniq, rows). Letting XLA partition a global
+    unique/segment_sum instead reshuffles every per-fetch contribution
+    through an all-to-all (about 1 GB per step at batch 64 x 128, two memory
+    layers), which failed with an NCCL error on 2x T4.
+    """
+    try:
+        from jax import shard_map
+    except ImportError:  # older JAX
+        from jax.experimental.shard_map import shard_map
+    from jax.sharding import PartitionSpec as P
+
+    grads = [probe_grads[layer] for layer in layers]
+
+    def local(slots, weights, grads):
+        uniq, rows = fetched_row_grads({"slots": slots, "weights": weights},
+                                       dict(zip(layers, grads)), layers, pool_size)
+        uniq = jax.lax.all_gather(uniq, "data", tiled=True)
+        rows = jax.lax.all_gather(rows, "data", tiled=True)
+        return _merge_rows(uniq, rows, pool_size)
+
+    # every device merges the same all-gathered data, so the outputs are
+    # replicated by construction; JAX can't infer that through unique()
+    import inspect
+
+    flag = "check_vma" if "check_vma" in inspect.signature(shard_map).parameters else "check_rep"
+    return shard_map(local, mesh=mesh, in_specs=(P("data"), P("data"), P("data")),
+                     out_specs=(P(), P()), **{flag: False})(list(aux["slots"]), list(aux["weights"]), grads)
 
 
 class Trainer:
@@ -321,7 +361,10 @@ class Trainer:
 
             (_, (metrics, aux)), (g_rest, g_probe) = jax.value_and_grad(
                 loss_fn, argnums=(0, 1), has_aux=True)(rest, probes)
-            uniq, g_rows = fetched_row_grads(aux, g_probe, layers, self.mcfg.pool_size)
+            if self.mesh is not None:
+                uniq, g_rows = fetched_row_grads_sharded(aux, g_probe, layers, self.mcfg.pool_size, self.mesh)
+            else:
+                uniq, g_rows = fetched_row_grads(aux, g_probe, layers, self.mcfg.pool_size)
 
             # clip by the global norm of both parts together
             gnorm = jnp.sqrt(optax.tree.norm(g_rest) ** 2 + jnp.sum(g_rows**2))
