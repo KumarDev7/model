@@ -20,6 +20,7 @@ def main():
         "dense": _load("dense_comparison.json"),
         "capacity": _load("capacity.json"),
         "retention": _load("retention.json"),
+        "generalization": _load("generalization.json"),
     }
     for row in data["dense"] or []:
         row.pop("history", None)

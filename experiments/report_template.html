@@ -229,6 +229,15 @@ footer { color: var(--muted); font-size: 13px; }
     </div>
   </section>
 
+  <section id="s-gen">
+    <div class="head">
+      <div class="eyebrow">Test 7 · generalization</div>
+      <h2>Does it do more than recall what it was trained on?</h2>
+    </div>
+    <p class="answer" id="gen-answer"></p>
+    <div class="tablewrap"><table id="t-gen"></table></div>
+  </section>
+
   <section id="s-setup">
     <div class="head">
       <div class="eyebrow">Setup</div>
@@ -242,7 +251,7 @@ footer { color: var(--muted); font-size: 13px; }
 
 <script>
 const DATA = __DATA__;
-const A = DATA.analysis, D = DATA.dense, C = DATA.capacity, R = DATA.retention;
+const A = DATA.analysis, D = DATA.dense, C = DATA.capacity, R = DATA.retention, G = DATA.generalization;
 const $ = (id) => document.getElementById(id);
 const pct = (v, d = 1) => (100 * v).toFixed(d) + "%";
 const num = (v) => Math.round(v).toLocaleString("en-US");
@@ -457,6 +466,23 @@ function render() {
     $("ret-answer").innerHTML = ANSWERS.ret(R);
   } else {
     $("s-ret").hidden = true;
+  }
+  // ---- test 7
+  if (G) {
+    const labels = {
+      memorised: "Memorized facts (trained entities)",
+      paraphrase_seen: "Paraphrase, seen in training",
+      paraphrase_transfer: "Paraphrase transfer (never seen in that wording)",
+      rule_unseen_entities: "Rule on unseen entities",
+      exceptions_memorised: "Rule exceptions remembered",
+      unknowable: "Unknowable facts (chance 0.4%)",
+    };
+    const m = G.models.memory.final, d = G.models.dense_matched?.final;
+    $("t-gen").innerHTML = `<tr><th>Test</th><th>Facts</th><th>Pool model</th><th>Dense model</th><th>Pool: wrong but &gt;50% confident</th></tr>` +
+      Object.keys(labels).map(k => `<tr><td>${labels[k]}</td><td>${num(m[k].n)}</td><td>${pct(m[k].accuracy)}</td><td>${d ? pct(d[k].accuracy) : "–"}</td><td>${pct(m[k].confident_wrong)}</td></tr>`).join("");
+    $("gen-answer").innerHTML = ANSWERS.gen(G);
+  } else {
+    $("s-gen").hidden = true;
   }
   $("setup").innerHTML = SETUP.map(s => `<li>${s}</li>`).join("");
 }
