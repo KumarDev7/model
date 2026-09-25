@@ -122,7 +122,9 @@ def merge_layer_aux(layer_aux: List[Dict[str, Any]]) -> Dict[str, Any]:
         "balance_loss": jnp.mean(jnp.stack([a["balance_loss"] for a in layer_aux])),
         "subkey_counts": sum(a["subkey_counts"] for a in layer_aux),
         "slot_counts": sum(a["slot_counts"] for a in layer_aux),
-        "queries": jnp.concatenate([a["queries"] for a in layer_aux], axis=0),
+        # kept per layer: concatenating along the (batch-sharded) leading
+        # axis forces an all-to-all under data parallelism
+        "queries": [a["queries"] for a in layer_aux],
         "slots": [a["slots"] for a in layer_aux],
         "weights": [a["weights"] for a in layer_aux],
         "temperature": layer_aux[0]["temperature"],

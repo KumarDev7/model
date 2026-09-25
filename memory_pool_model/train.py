@@ -419,8 +419,14 @@ class Trainer:
             sk = sk / sk.sum(axis=-1, keepdims=True)
             subkey_usage = d * subkey_usage + (1 - d) * sk
             slot_usage = d * slot_usage + (1 - d) * aux["slot_counts"] / aux["slot_counts"].sum()
-            pick = jax.random.randint(r_sample, (QUERY_SAMPLE,), 0, aux["queries"].shape[0])
-            queries = aux["queries"][pick]
+            # Revival sample: the same random positions from every sequence
+            # and layer. Indexing the (unsharded) time axis and stacking layers
+            # on a new axis keeps it local to each device under data parallelism.
+            B, T = batch["inputs"].shape
+            qs = [q.reshape(B, T, *q.shape[1:]) for q in aux["queries"]]
+            n_t = max(1, -(-QUERY_SAMPLE // (B * len(qs))))
+            t_idx = jax.random.randint(r_sample, (n_t,), 0, T)
+            queries = jnp.stack([q[:, t_idx] for q in qs], axis=1).reshape(-1, *qs[0].shape[2:])
             batch_stats = usage_stats(aux["slot_counts"])
             ema_stats = usage_stats(slot_usage)
             metrics.update(
