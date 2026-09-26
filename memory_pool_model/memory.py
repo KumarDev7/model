@@ -57,10 +57,10 @@ class MemoryPool(nn.Module):
     init_temperature: float = 10.0
     # Lower bound of the routing temperature. With a low bound the model can
     # flatten the mixing weights until the Gumbel noise decides every pick.
-    min_temperature: float = 1.0
+    min_temperature: float = 10.0
     # Let the balance loss change the temperature. When on, the loss can be
     # lowered by flattening the router softmax instead of spreading usage.
-    balance_temperature_grad: bool = True
+    balance_temperature_grad: bool = False
     # Name of a registered host_pool.HostPool: the value table then lives in
     # host RAM / on SSD and fetched rows are copied in (no "values" param).
     host_pool: str = ""

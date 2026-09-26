@@ -16,7 +16,7 @@ are ever picked.
 
     KT_RESULTS=experiments/results/memorization python -m experiments.memorization_ablation train --gpus 0,1 --per_gpu 3
     KT_RESULTS=experiments/results/memorization python -m experiments.memorization_ablation analyze
-    (--gpus cpu runs on the CPU; --round 2 for the temperature fixes)
+    (--gpus cpu runs on the CPU; --round 2: temperature fixes; --round 3: fix + anneal / longer)
 """
 
 from __future__ import annotations
@@ -35,7 +35,9 @@ from . import knowledge_tests as kt
 BASE = ["--num_entities", "4096", "--num_relations", "4"]
 ANNEAL = ["--noise_anneal_start", "0.6", "--noise_anneal_end", "0.9"]
 REVIVE50 = ["--revive_until", "0.5"]
-ARMS = {
+# Round 1 ran before the temperature fix; OLD reproduces its settings.
+OLD = ["--balance_temperature_grad", "true", "--min_temperature", "1.0"]
+ARMS = {k: v + OLD for k, v in {
     "base": ["--steps", "4000"],
     "anneal": ["--steps", "4000", *ANNEAL],
     "revive50": ["--steps", "4000", *REVIVE50],
@@ -43,18 +45,23 @@ ARMS = {
     "both_lr": ["--steps", "4000", *ANNEAL, *REVIVE50, "--pool_lr_mult", "6.0"],
     "long": ["--steps", "6000"],
     "both_long": ["--steps", "6000", *ANNEAL, *REVIVE50],
-}
+}.items()}
 # Round 2. Round 1 showed the cause: in 6 of 7 runs the learnable routing
 # temperature fell to its floor (1.0) and stayed there; routing then
 # concentrated and learning slowed. Two seeds per arm (runs also differ
 # from GPU nondeterminism, so one run per arm is not enough).
-SGT = ["--balance_temperature_grad", "false"]
-FLOOR = ["--min_temperature", "10.0"]
+SGT = ["--balance_temperature_grad", "false", "--min_temperature", "1.0"]
+FLOOR = ["--balance_temperature_grad", "true", "--min_temperature", "10.0"]
 ARMS2 = {}
-for name, flags, seeds in (("base", [], (1, 2)), ("sgt", SGT, (0, 1)), ("floor10", FLOOR, (0, 1)),
-                           ("fix", SGT + FLOOR, (0, 1))):
+for name, flags, seeds in (("base", OLD, (1, 2)), ("sgt", SGT, (0, 1)), ("floor10", FLOOR, (0, 1)),
+                           ("fix", ["--balance_temperature_grad", "false", "--min_temperature", "10.0"], (0, 1))):
     for seed in seeds:
         ARMS2[f"{name}_s{seed}"] = ["--steps", "4000", "--seed", str(seed), *flags]
+# Round 3: the fix (now the default) + noise fade-out, and + longer training.
+ARMS3 = {}
+for seed in (0, 1):
+    ARMS3[f"fix_anneal_s{seed}"] = ["--steps", "4000", "--seed", str(seed), *ANNEAL]
+    ARMS3[f"fix_long_s{seed}"] = ["--steps", "6000", "--seed", str(seed)]
 
 
 def _done(arm):
@@ -138,10 +145,10 @@ if __name__ == "__main__":
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--round", type=int, default=1)
     a = ap.parse_args()
-    if a.round == 2:
+    if a.round > 1:
         ARMS.clear()
-        ARMS.update(ARMS2)
+        ARMS.update(ARMS2 if a.round == 2 else ARMS3)
     if a.cmd == "train":
         train(a.gpus.split(","), a.per_gpu, a.only)
     else:
-        analyze("memorization.json" if a.round == 1 else "memorization2.json")
+        analyze("memorization.json" if a.round == 1 else f"memorization{a.round}.json")

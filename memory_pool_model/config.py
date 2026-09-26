@@ -47,9 +47,13 @@ class ModelConfig:
     # Initial inverse temperature for cosine routing scores (learnable).
     init_temperature: float = 10.0
     # Lower bound of the learnable temperature, and whether the balance loss
-    # may change it (see MemoryPool).
-    min_temperature: float = 1.0
-    balance_temperature_grad: bool = True
+    # may change it (see MemoryPool). With the old values (1.0, True) the
+    # temperature fell to 1.0 in 7 of 9 fact-task runs: near-uniform mixing,
+    # routing concentrated on 27-52% of the pool, 75.8-99.5% accuracy. With
+    # these defaults 6 of 6 runs reached 99.92-99.99% with 99.95-100% of the
+    # pool active (experiments/memorization_ablation.py).
+    min_temperature: float = 10.0
+    balance_temperature_grad: bool = False
 
     @property
     def pool_size(self) -> int:
