@@ -1,4 +1,4 @@
-"""Datasets: a synthetic knowledge base and plain byte-level text."""
+"""Datasets: a synthetic knowledge base, byte-level text, and pre-tokenised text."""
 
 from __future__ import annotations
 
@@ -122,3 +122,32 @@ class TextDataset:
         starts = np.arange(0, len(self.eval) - self.seq_len - 1, self.seq_len)
         for i in range(0, min(len(starts), batch_size * max_batches), batch_size):
             yield self._windows(self.eval, starts[i : i + batch_size])
+
+
+class TokenDataset:
+    """Pre-tokenised text: flat .npy token arrays (e.g. uint16 BPE ids), read
+    through a memory map so large corpora don't have to fit in RAM.
+
+    Training windows are sampled at random offsets of `train_path`; evaluation
+    walks `eval_path` (held-out documents) in consecutive windows."""
+
+    def __init__(self, train_path: str, eval_path: str, vocab_size: int, seq_len: int = 256,
+                 eval_windows: int = 640):
+        self.train = np.load(train_path, mmap_mode="r")
+        self.eval = np.load(eval_path, mmap_mode="r")
+        self.seq_len, self.vocab_size, self.eval_windows = seq_len, vocab_size, eval_windows
+
+    @staticmethod
+    def windows(data: np.ndarray, starts: np.ndarray, seq_len: int) -> Batch:
+        seq = np.stack([np.asarray(data[s : s + seq_len + 1]) for s in starts]).astype(np.int32)
+        return {"inputs": seq[:, :-1], "targets": seq[:, 1:],
+                "mask": np.ones(seq[:, 1:].shape, np.float32)}
+
+    def sample(self, rng: np.random.Generator, batch_size: int) -> Batch:
+        starts = rng.integers(0, len(self.train) - self.seq_len - 1, size=batch_size)
+        return self.windows(self.train, starts, self.seq_len)
+
+    def eval_batches(self, batch_size: int) -> Iterator[Batch]:
+        starts = np.arange(0, len(self.eval) - self.seq_len - 1, self.seq_len)[: self.eval_windows]
+        for i in range(0, len(starts), batch_size):
+            yield self.windows(self.eval, starts[i : i + batch_size], self.seq_len)

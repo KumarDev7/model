@@ -4,6 +4,7 @@ Usage:
     python -m memory_pool_model.train --task facts --steps 3000
     python -m memory_pool_model.train --task facts --use_memory false   # baseline
     python -m memory_pool_model.train --task text --text_path input.txt
+    python -m memory_pool_model.train --task tokens --train_tokens train.npy --eval_tokens val.npy --vocab_size 16384
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import optax
 from flax import serialization, struct
 
 from .config import ModelConfig, TrainConfig
-from .data import FactDataset, TextDataset
+from .data import FactDataset, TextDataset, TokenDataset
 from .memory import key_diversity_loss, revive_dead_keys
 from .model import MemoryPoolLM
 
@@ -669,7 +670,10 @@ def _from_args(cls, args, **overrides):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--task", choices=["facts", "text"], default="facts")
+    parser.add_argument("--task", choices=["facts", "text", "tokens"], default="facts")
+    parser.add_argument("--train_tokens", type=str, default=None, help="--task tokens: training .npy")
+    parser.add_argument("--eval_tokens", type=str, default=None, help="--task tokens: held-out .npy")
+    parser.add_argument("--eval_windows", type=int, default=640, help="--task tokens: held-out windows per eval")
     parser.add_argument("--text_path", type=str, default=None)
     parser.add_argument("--num_entities", type=int, default=4096)
     parser.add_argument("--num_relations", type=int, default=4)
@@ -695,6 +699,15 @@ def main():
         )
         dataset = FactDataset(**meta["dataset"])
         mcfg = _from_args(ModelConfig, args, vocab_size=dataset.vocab_size, max_len=dataset.seq_len)
+    elif args.task == "tokens":
+        if not (args.train_tokens and args.eval_tokens and args.vocab_size):
+            parser.error("--task tokens needs --train_tokens, --eval_tokens and --vocab_size")
+        seq_len = args.max_len or ModelConfig.max_len
+        dataset = TokenDataset(args.train_tokens, args.eval_tokens, args.vocab_size, seq_len=seq_len,
+                               eval_windows=args.eval_windows)
+        meta["dataset"] = {"train_tokens": args.train_tokens, "eval_tokens": args.eval_tokens,
+                           "train_size": int(len(dataset.train)), "eval_size": int(len(dataset.eval))}
+        mcfg = _from_args(ModelConfig, args)
     else:
         if not args.text_path:
             parser.error("--text_path is required for --task text")
