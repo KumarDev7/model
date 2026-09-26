@@ -7,7 +7,9 @@
   * ood.npy: Tiny Shakespeare (a different domain),
   * train_counts.npy: how often each token id occurs in train.npy.
 
-Documents are separated by <|endoftext|>. Arrays are uint16.
+Documents are separated by <|endoftext|>. Arrays are uint16. The dataset
+is streamed: documents are read over HTTP as they are tokenised and
+nothing from Ultra-FineWeb is stored locally except the token arrays.
 
     python -m experiments.prepare_ultrafineweb --out /root/ufw/tok
 """
@@ -20,21 +22,21 @@ import os
 import urllib.request
 
 import numpy as np
-import pyarrow.parquet as pq
-from huggingface_hub import hf_hub_download
+from datasets import load_dataset
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 
-REPO = "openbmb/Ultra-FineWeb"
-PART = "data/ultrafineweb_en/ultrafineweb-en-part-{:04d}-of-2048.parquet"
+PART = "hf://datasets/openbmb/Ultra-FineWeb/data/ultrafineweb_en/ultrafineweb-en-part-{:04d}-of-2048.parquet"
 SHAKESPEARE = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
 EOT = "<|endoftext|>"
 
 
-def docs(part: int, cache: str):
-    path = hf_hub_download(REPO, PART.format(part), repo_type="dataset", local_dir=cache)
-    f = pq.ParquetFile(path)
-    for batch in f.iter_batches(batch_size=4096, columns=["content"]):
-        yield from (t for t in batch.column(0).to_pylist() if t)
+def docs(part: int):
+    """Stream the documents of one Ultra-FineWeb file (nothing is downloaded
+    to disk)."""
+    ds = load_dataset("parquet", data_files=PART.format(part), split="train", streaming=True)
+    for row in ds.select_columns(["content"]):
+        if row["content"]:
+            yield row["content"]
 
 
 def train_tokenizer(texts, vocab: int) -> Tokenizer:
@@ -74,7 +76,6 @@ def encode(tok: Tokenizer, texts, limit: int, chunk: int = 2048) -> np.ndarray:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--cache", default="/root/ufw")
     ap.add_argument("--vocab", type=int, default=16384)
     ap.add_argument("--tokenizer_docs", type=int, default=100_000)
     ap.add_argument("--train_tokens", type=int, default=100_000_000)
@@ -87,16 +88,16 @@ def main():
         tok = Tokenizer.from_file(tok_path)
     else:
         print("training BPE tokenizer", flush=True)
-        it = docs(1, a.cache)
+        it = docs(1)
         tok = train_tokenizer((next(it) for _ in range(a.tokenizer_docs)), a.vocab)
         tok.save(tok_path)
 
     print("train split (part 1)", flush=True)
-    train = encode(tok, docs(1, a.cache), a.train_tokens)
+    train = encode(tok, docs(1), a.train_tokens)
     np.save(os.path.join(a.out, "train.npy"), train)
     np.save(os.path.join(a.out, "train_counts.npy"), np.bincount(train, minlength=tok.get_vocab_size()))
     print("held-out split (part 2)", flush=True)
-    val = encode(tok, docs(2, a.cache), a.val_tokens)
+    val = encode(tok, docs(2), a.val_tokens)
     np.save(os.path.join(a.out, "val.npy"), val)
     print("out-of-domain split (Tiny Shakespeare)", flush=True)
     text = urllib.request.urlopen(SHAKESPEARE).read().decode()
