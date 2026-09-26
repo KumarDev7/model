@@ -75,6 +75,50 @@ pool (host row updates and transfers); host pool + data parallel is not
 supported yet; no mixed precision (T4 lacks bf16); the Shakespeare model
 overfits the 1 MB corpus after step 2,000.
 
+## Real text: Ultra-FineWeb (2x T4)
+
+`experiments/prepare_ultrafineweb.py` streams Ultra-FineWeb English and
+trains a 16k byte-level BPE; `experiments/text_study.py` trains five models
+on the same 30M training tokens (6,000 steps x 8,192 tokens, 1.6 passes)
+and evaluates held-out documents from a different file, the training text,
+and Tiny Shakespeare (another domain). Same backbone everywhere: d_model 256,
+4 layers, FFN x4. Pool: 262,144 vectors x 256 (67M parameters), read in
+layers 1 and 3, 128 vectors per token. Results: `experiments/results/text/`.
+
+| Model | Params | Held-out ppl | Shakespeare ppl | Train - held-out loss | Held-out ppl, pool removed |
+|---|---|---|---|---|---|
+| dense (backbone only) | 7.4M | **78.5** | 157.7 | +0.09 | - |
+| pool, FFN kept (`memory_ffn`) | 75.3M | 78.6 | **153.5** | +0.09 | ~10^16 |
+| pool (defaults: pool replaces FFN in 2 layers) | 74.3M | 88.8 | 174.9 | +0.07 | ~10^15 |
+| pool, no no-pool penalty | 74.3M | 88.3 | 174.2 | +0.08 | 88.5 |
+| pool, old temperature settings | 74.3M | 88.9 | 175.2 | +0.07 | ~10^14 |
+
+What this shows:
+
+* **No collapse on real text.** On held-out text 92-100% of vectors are read
+  and 76-95% get a fair share, every sub-key is used, and pool use kept
+  spreading through training (active 70% -> 94% from step 1,000 to 6,000).
+  The first memory layer is less even than the second (spread 0.40 vs 0.56-0.61).
+  Shakespeare concentrates on fewer vectors (spread 0.22-0.30) but 99.9% of
+  its reads land on vectors held-out text also uses.
+* **No overfitting.** Held-out loss is *below* training loss for every model
+  (the held-out file is slightly easier), and the pool models' gap equals
+  the dense model's: 67M pool parameters did not memorise the 30M training
+  tokens at 1.6 passes.
+* **The pool does not help language modelling at this scale.** With the FFN
+  kept, it matches the dense model on held-out text and is slightly better
+  on Shakespeare; replacing the FFN with the pool costs 13% perplexity.
+  Without the no-pool penalty the backbone ignores the pool (removing it
+  changes nothing); with the penalty everything is routed through it but
+  the result is no better. Rare tokens show no gain either.
+* **Routing is not selective on text.** The top vector's weight is 0.07-0.08,
+  about 1/16: each head averages its 16 vectors almost evenly. The
+  temperature stays at its floor (10) with the fix; with the old settings
+  it drifted down to 5.6 over training (on the fact task it rose to 20-30,
+  with top weight ~0.6). Making reads selective on text (sharper scores,
+  fewer vectors per head) and far more training tokens are the next steps
+  before the pool can hold knowledge the backbone lacks.
+
 ## Layout
 
 | file | what |
