@@ -91,7 +91,7 @@ def analyze(data, out, n_windows, only=None):
             lt = float(params["pool"]["log_temperature"])
             row["temperature"] = float(np.exp(np.clip(lt, np.log(mcfg.min_temperature), np.log(mcfg.max_temperature))))
         row["heldout"], _ = ts.measure(mcfg, params, fwd, fwd_off, ts.windows(val, n_windows))
-        row["ood_shakespeare"], _ = ts.measure(mcfg, params, fwd, fwd_off, ts.windows(ood, n_windows // 2))
+        row["ood_shakespeare"], _ = ts.measure(mcfg, params, fwd, fwd_off, ts.windows(ood, max(n_windows // 2, 32)))
         row["facts_A"] = fit.recall_report(mcfg, params, tok, facts["A"], facts)
         row["facts_B_untrained"] = fit.recall_report(mcfg, params, tok, facts["B"][:300], facts)
         print(json.dumps({k: v for k, v in row.items() if k != "history"}, default=float)[:1800], flush=True)
