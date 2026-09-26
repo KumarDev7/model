@@ -125,6 +125,23 @@ def test_query_scale_sharpens_reads_without_changing_picks():
     assert float(b["top1_weight"]) > float(a["top1_weight"])  # but a sharper mix
 
 
+def test_pool_values_only_changes_nothing_else():
+    ds = FactDataset(num_entities=16, num_relations=2, num_attributes=8, name_len=2)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=16, n_layers=2, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=8, d_value=8, top_k=2)
+    tr = Trainer(mcfg, TrainConfig(pool_values_only=True, warmup_steps=1))
+    s0 = tr.init(jax.random.PRNGKey(0))
+    s1 = s0
+    for i in range(2):  # the learning rate is 0 at step 0 (warmup)
+        s1, _, _ = tr.train_step(s1, ds.sample(np.random.default_rng(i), 4), jax.random.PRNGKey(i))
+    flat0 = jax.tree_util.tree_flatten_with_path(s0.params)[0]
+    for (path, a), b in zip(flat0, jax.tree_util.tree_leaves(s1.params)):
+        if _path_is(path, "pool", "values"):
+            assert not np.allclose(a, b)
+        else:
+            np.testing.assert_array_equal(a, b)
+
+
 def test_noise_anneal_schedule():
     from memory_pool_model.train import noise_scale_at
     assert noise_scale_at(TrainConfig(steps=100), 99) == 1.0  # default: never annealed

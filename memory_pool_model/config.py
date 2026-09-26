@@ -113,6 +113,9 @@ class TrainConfig:
     # Two-stage training: after this step the backbone is frozen and only
     # the pool path (pool, router, read gate/projection) keeps learning.
     freeze_backbone_after_step: int = 0
+    # Update only the pool's value vectors (everything else frozen): adding
+    # knowledge to a trained model by writing to the pool alone.
+    pool_values_only: bool = False
 
     # ---- scale ----
     # Update only the pool rows fetched this step (lazy Adam). Gradient and

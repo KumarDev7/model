@@ -60,11 +60,12 @@ PROMPTS = ["The heart is a muscular organ that", "In 1969, the first humans", "T
 FREQ_BUCKETS = [(0, 10), (10, 100), (100, 1_000), (1_000, 10_000), (10_000, 100_000), (100_000, 10**12)]
 
 
-def train(data, out, gpus, per_gpu, steps, only):
+def launch(arms, common, out, gpus, per_gpu, only=None):
+    """Train each arm (flags appended to `common`) as its own process,
+    per_gpu at a time on each listed GPU; skips arms already saved."""
     ckpt = os.path.join(out, "ckpt")
     os.makedirs(ckpt, exist_ok=True)
-    vocab = json.load(open(os.path.join(data, "meta.json")))["vocab_size"]
-    todo = [a for a in ARMS if (not only or a in only)
+    todo = [a for a in arms if (not only or a in only)
             and not os.path.exists(os.path.join(ckpt, a + ".msgpack.json"))]
     slots = [g for g in gpus for _ in range(per_gpu)]
     running = {}
@@ -74,11 +75,7 @@ def train(data, out, gpus, per_gpu, steps, only):
             s, arm = free.pop(0), todo.pop(0)
             env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(slots[s]),
                    "XLA_PYTHON_CLIENT_MEM_FRACTION": f"{0.9 / per_gpu:.2f}"}
-            cmd = [sys.executable, "-m", "memory_pool_model.train", "--task", "tokens",
-                   "--train_tokens", os.path.join(data, "train.npy"),
-                   "--eval_tokens", os.path.join(data, "val.npy"), "--vocab_size", str(vocab),
-                   "--eval_windows", "256", *BACKBONE, *ARMS[arm], "--steps", str(steps),
-                   "--log_every", "250", "--eval_every", "1000", "--checkpoint_every", "1000",
+            cmd = [sys.executable, "-m", "memory_pool_model.train", *common, *arms[arm],
                    "--save", os.path.join(ckpt, arm + ".msgpack"), "--resume"]
             log = open(os.path.join(out, f"train_{arm}.log"), "a")
             print(f"[start] {arm} on gpu {slots[s]}", flush=True)
@@ -88,6 +85,18 @@ def train(data, out, gpus, per_gpu, steps, only):
             if p.poll() is not None:
                 print(f"[done ] {arm} exit={p.returncode}", flush=True)
                 del running[s]
+
+
+def token_task_args(data, steps, eval_windows=256):
+    vocab = json.load(open(os.path.join(data, "meta.json")))["vocab_size"]
+    return ["--task", "tokens", "--train_tokens", os.path.join(data, "train.npy"),
+            "--eval_tokens", os.path.join(data, "val.npy"), "--vocab_size", str(vocab),
+            "--eval_windows", str(eval_windows), "--steps", str(steps),
+            "--log_every", "250", "--eval_every", "1000", "--checkpoint_every", "1000"]
+
+
+def train(data, out, gpus, per_gpu, steps, only):
+    launch(ARMS, token_task_args(data, steps) + BACKBONE, out, gpus, per_gpu, only)
 
 
 # ----------------------------------------------------------------- analysis

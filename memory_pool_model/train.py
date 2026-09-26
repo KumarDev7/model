@@ -389,6 +389,8 @@ class Trainer:
             g_rows = g_rows * scale
 
             updates, opt_state = self.optimizer.update(g_rest, state.opt_state, rest)
+            if t.pool_values_only:
+                updates = jax.tree_util.tree_map(jnp.zeros_like, updates)
             if freeze:
                 updates = jax.tree_util.tree_map_with_path(
                     lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
