@@ -81,6 +81,12 @@ class MemoryPool(nn.Module):
     # Let the balance loss change the temperature. When on, the loss can be
     # lowered by flattening the router softmax instead of spreading usage.
     balance_temperature_grad: bool = False
+    # Upper bound of the routing temperature.
+    max_temperature: float = 100.0
+    # Scale each query's scores by its own length (|q| / sqrt(d_key/2)):
+    # keys stay unit-norm, so the router can make individual reads sharp
+    # without a global temperature. Off = pure cosine routing.
+    query_scale: bool = False
     # Name of a registered host_pool.HostPool: the value table then lives in
     # host RAM / on SSD and fetched rows are copied in (no "values" param).
     host_pool: str = ""
@@ -125,6 +131,7 @@ class MemoryPool(nn.Module):
         half = self.d_key // 2
 
         q = queries.reshape(-1, H, 2, half)  # [M, H, 2, half]
+        q_len = jnp.sqrt(jnp.sum(q * q, axis=-1, keepdims=True) + 1e-6) / jnp.sqrt(half)
         q = _l2_normalize(q)
         keys = _l2_normalize(self.sub_keys)
         # Clamp with a straight-through gradient: a plain clip has zero
@@ -132,12 +139,14 @@ class MemoryPool(nn.Module):
         # could never move back.
         log_t = self.log_temperature
         log_t = log_t + jax.lax.stop_gradient(
-            jnp.clip(log_t, jnp.log(self.min_temperature), jnp.log(100.0)) - log_t)
+            jnp.clip(log_t, jnp.log(self.min_temperature), jnp.log(self.max_temperature)) - log_t)
         temperature = jnp.exp(log_t)
 
         # Cosine similarity of each query half with every sub-key.
         cos = jnp.einsum("mhcd,hcnd->mhcn", q, keys)
         scores = cos * temperature
+        if self.query_scale:
+            scores = scores * q_len
 
         # Noise only changes *which* slots are selected, never their weights.
         if train and self.routing_noise > 0:
@@ -209,6 +218,7 @@ class MemoryPool(nn.Module):
             "slots": slots.reshape(*lead_shape, H, k),
             "weights": weights.reshape(*lead_shape, H, k),
             "temperature": temperature,
+            "top1_weight": jax.lax.stop_gradient(weights.max(-1).mean()),
         }
         return out, aux
 

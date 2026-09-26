@@ -321,6 +321,7 @@ class Trainer:
                 balance_loss=aux["balance_loss"],
                 key_diversity=div,
                 temperature=aux["temperature"],
+                top1_weight=aux["top1_weight"],
             )
         use_nopool = self.mcfg.use_memory and (not train or nopool)
         if use_nopool:

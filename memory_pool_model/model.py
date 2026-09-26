@@ -74,6 +74,8 @@ class MemoryPoolLM(nn.Module):
                 init_temperature=cfg.init_temperature,
                 min_temperature=cfg.min_temperature,
                 balance_temperature_grad=cfg.balance_temperature_grad,
+                max_temperature=cfg.max_temperature,
+                query_scale=cfg.router_query_scale,
                 host_pool=cfg.host_pool,
                 name="pool",
             )
@@ -132,4 +134,6 @@ def merge_layer_aux(layer_aux: List[Dict[str, Any]]) -> Dict[str, Any]:
         "slots": [a["slots"] for a in layer_aux],
         "weights": [a["weights"] for a in layer_aux],
         "temperature": layer_aux[0]["temperature"],
+        # mean weight of the strongest of the top-k vectors (1/k = uniform mix)
+        "top1_weight": jnp.mean(jnp.stack([a["top1_weight"] for a in layer_aux])),
     }

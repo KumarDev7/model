@@ -115,6 +115,16 @@ def test_state_types_are_stable_across_steps():
     assert sig(state) == sig(s1) == sig(s2)
 
 
+def test_query_scale_sharpens_reads_without_changing_picks():
+    pool = MemoryPool(n_sub_keys=N_SUB, heads=HEADS, d_key=D_KEY, d_value=D_VALUE, top_k=K, query_scale=True)
+    q = jax.random.normal(jax.random.PRNGKey(0), (3, 5, HEADS, D_KEY))
+    params = pool.init(jax.random.PRNGKey(1), q)
+    _, a = pool.apply(params, q)
+    _, b = pool.apply(params, q * 10.0)
+    np.testing.assert_array_equal(a["slots"], b["slots"])  # same vectors (cosine order)
+    assert float(b["top1_weight"]) > float(a["top1_weight"])  # but a sharper mix
+
+
 def test_noise_anneal_schedule():
     from memory_pool_model.train import noise_scale_at
     assert noise_scale_at(TrainConfig(steps=100), 99) == 1.0  # default: never annealed

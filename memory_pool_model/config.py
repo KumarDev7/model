@@ -54,6 +54,9 @@ class ModelConfig:
     # pool active (experiments/memorization_ablation.py).
     min_temperature: float = 10.0
     balance_temperature_grad: bool = False
+    max_temperature: float = 100.0
+    # Scale routing scores by each query's length (per-token sharpness).
+    router_query_scale: bool = False
 
     @property
     def pool_size(self) -> int:
