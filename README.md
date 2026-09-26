@@ -61,7 +61,7 @@ All numbers from `experiments/results/final/gpu_validation.json` and
 
 | Check | Result |
 |---|---|
-| Knowledge in the pool (fact task, 16,384 facts) | **99.95-99.99%** accuracy (1-8 of 16,384 facts wrong, 6 runs with the default recipe), **0%** with the pool removed, 99.9-100% of the pool active, every slot reached (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad, routing-temperature fix; `experiments/results/memorization2/`, `memorization3/`). Before the temperature fix: 99.8% in the best run, 75.8% in the worst |
+| Knowledge in the pool (fact task, 16,384 facts) | **99.95-99.99%** accuracy (1-8 of 16,384 facts wrong; 2 runs with the defaults, 4 more with noise fade-out or 6,000 steps on top), **0%** with the pool removed, 99.9-100% of the pool active, every slot reached (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad, routing-temperature fix; `experiments/results/memorization2/`, `memorization3/`). Before the temperature fix: 99.8% in the best run, 75.8% in the worst |
 | Sparse pool gradients | equal to dense gradients (test); only fetched rows change |
 | Pool bigger than GPU memory, training | 4.2M rows in host RAM: 2.25 s/step, 2.5 GB GPU, 4.3 GB RAM (on-GPU version runs out of memory) |
 | Same accuracy with the pool off the GPU | 98.3% host pool vs 97.9% device pool (same recipe, Adam) |
