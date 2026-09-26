@@ -31,9 +31,29 @@ def _l2_normalize(x: jax.Array, axis: int = -1, eps: float = 1e-6) -> jax.Array:
     return x * jax.lax.rsqrt(jnp.sum(x * x, axis=axis, keepdims=True) + eps)
 
 
+def _top_k_by_max(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
+    """Exact top-k as k rounds of argmax + mask-out (ties: lowest index
+    first, like lax.top_k). On a T4 this is 9-15x faster than lax.top_k for
+    the router's shapes (65k rows x 512, k=16: 10.7 vs 95 ms)."""
+    ar = jnp.arange(x.shape[-1])
+    vals, idx = [], []
+    for _ in range(k):
+        i = jnp.argmax(x, axis=-1)
+        vals.append(jnp.take_along_axis(x, i[..., None], axis=-1)[..., 0])
+        idx.append(i)
+        x = jnp.where(ar == i[..., None], -jnp.inf, x)
+    return jnp.stack(vals, -1), jnp.stack(idx, -1)
+
+
 def _top_k(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
-    """lax.top_k over the last axis, run on a 2-D view (much faster on CPU)."""
-    v, i = jax.lax.top_k(x.reshape(-1, x.shape[-1]), k)
+    """Top-k over the last axis. lax.top_k on a 2-D view on CPU/TPU (much
+    faster than N-D on CPU); repeated argmax on GPU, where XLA's top_k is
+    slow for small k."""
+    flat = x.reshape(-1, x.shape[-1])
+    if jax.default_backend() == "gpu" and k <= 32:
+        v, i = _top_k_by_max(flat, k)
+    else:
+        v, i = jax.lax.top_k(flat, k)
     return v.reshape(*x.shape[:-1], k), i.reshape(*x.shape[:-1], k)
 
 

@@ -52,6 +52,17 @@ def test_product_keys_find_exact_top_k():
     np.testing.assert_array_equal(np.sort(got, -1), np.sort(brute, -1))
 
 
+def test_top_k_by_max_matches_lax_top_k():
+    from memory_pool_model.memory import _top_k_by_max
+    x = jax.random.normal(jax.random.PRNGKey(0), (64, 100))
+    x = x.at[:, 10].set(x[:, 3])  # ties
+    for k in (1, 4, 16):
+        v, i = _top_k_by_max(x, k)
+        v2, i2 = jax.lax.top_k(x, k)
+        np.testing.assert_array_equal(i, i2)
+        np.testing.assert_array_equal(v, v2)
+
+
 def test_noise_changes_selection_only_in_training():
     pool, params, q = make_pool(noise=5.0)
     rngs = {"routing": jax.random.PRNGKey(3)}
