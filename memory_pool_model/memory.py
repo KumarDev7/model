@@ -55,6 +55,12 @@ class MemoryPool(nn.Module):
     top_k: int
     routing_noise: float = 1.0
     init_temperature: float = 10.0
+    # Lower bound of the routing temperature. With a low bound the model can
+    # flatten the mixing weights until the Gumbel noise decides every pick.
+    min_temperature: float = 1.0
+    # Let the balance loss change the temperature. When on, the loss can be
+    # lowered by flattening the router softmax instead of spreading usage.
+    balance_temperature_grad: bool = True
     # Name of a registered host_pool.HostPool: the value table then lives in
     # host RAM / on SSD and fetched rows are copied in (no "values" param).
     host_pool: str = ""
@@ -101,10 +107,17 @@ class MemoryPool(nn.Module):
         q = queries.reshape(-1, H, 2, half)  # [M, H, 2, half]
         q = _l2_normalize(q)
         keys = _l2_normalize(self.sub_keys)
-        temperature = jnp.exp(jnp.clip(self.log_temperature, 0.0, jnp.log(100.0)))
+        # Clamp with a straight-through gradient: a plain clip has zero
+        # gradient outside the range, so a temperature that hit the bound
+        # could never move back.
+        log_t = self.log_temperature
+        log_t = log_t + jax.lax.stop_gradient(
+            jnp.clip(log_t, jnp.log(self.min_temperature), jnp.log(100.0)) - log_t)
+        temperature = jnp.exp(log_t)
 
         # Cosine similarity of each query half with every sub-key.
-        scores = jnp.einsum("mhcd,hcnd->mhcn", q, keys) * temperature
+        cos = jnp.einsum("mhcd,hcnd->mhcn", q, keys)
+        scores = cos * temperature
 
         # Noise only changes *which* slots are selected, never their weights.
         if train and self.routing_noise > 0:
@@ -156,7 +169,8 @@ class MemoryPool(nn.Module):
         clean_idx = sub_idx if select_scores is scores else _top_k(scores, k)[1]
         f = jax.lax.stop_gradient(count_subkeys(clean_idx) / (M * k))  # [H, 2, n]
         # P: mean router probability for each sub-key (differentiable).
-        P = jax.nn.softmax(scores, axis=-1).mean(axis=0)  # [H, 2, n]
+        p_scores = scores if self.balance_temperature_grad else cos * jax.lax.stop_gradient(temperature)
+        P = jax.nn.softmax(p_scores, axis=-1).mean(axis=0)  # [H, 2, n]
         # Equals 1 when routing is perfectly uniform; grows with collapse.
         balance_loss = n * jnp.mean(jnp.sum(f * P, axis=-1))
 

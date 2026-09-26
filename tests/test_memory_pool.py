@@ -65,6 +65,31 @@ def test_noise_changes_selection_only_in_training():
     np.testing.assert_array_equal(clean["slots"], off["slots"])
 
 
+def test_temperature_floor_and_balance_gradient():
+    def temp_grads(pool_kw, log_t):
+        pool = MemoryPool(n_sub_keys=N_SUB, heads=HEADS, d_key=D_KEY, d_value=D_VALUE, top_k=K, **pool_kw)
+        q = jax.random.normal(jax.random.PRNGKey(0), (3, 5, HEADS, D_KEY))
+        params = pool.init(jax.random.PRNGKey(1), q)
+        params = jax.tree_util.tree_map(lambda x: x, params)
+        params["params"]["log_temperature"] = jnp.asarray(log_t)
+
+        def f(p, what):
+            out, aux = pool.apply(p, q)
+            return aux["balance_loss"] if what == "balance" else jnp.sum(out**2)
+
+        g = lambda what: float(jax.grad(f)(params, what)["params"]["log_temperature"])
+        return g("balance"), g("read"), float(pool.apply(params, q)[1]["temperature"])
+
+    # the floor clamps the value but still passes gradient (no dead temperature)
+    _, g_read, t = temp_grads({"min_temperature": 5.0}, jnp.log(2.0))
+    assert abs(t - 5.0) < 1e-4 and g_read != 0.0
+    # the balance loss can't lower its value by flattening the router
+    g_bal, _, _ = temp_grads({"balance_temperature_grad": True}, jnp.log(10.0))
+    assert g_bal != 0.0
+    g_bal, g_read, _ = temp_grads({"balance_temperature_grad": False}, jnp.log(10.0))
+    assert g_bal == 0.0 and g_read != 0.0
+
+
 def test_noise_anneal_schedule():
     from memory_pool_model.train import noise_scale_at
     assert noise_scale_at(TrainConfig(steps=100), 99) == 1.0  # default: never annealed

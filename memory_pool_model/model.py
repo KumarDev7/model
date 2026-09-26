@@ -72,6 +72,8 @@ class MemoryPoolLM(nn.Module):
                 top_k=cfg.top_k,
                 routing_noise=cfg.routing_noise,
                 init_temperature=cfg.init_temperature,
+                min_temperature=cfg.min_temperature,
+                balance_temperature_grad=cfg.balance_temperature_grad,
                 host_pool=cfg.host_pool,
                 name="pool",
             )

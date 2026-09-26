@@ -46,6 +46,10 @@ class ModelConfig:
     routing_noise: float = 1.0
     # Initial inverse temperature for cosine routing scores (learnable).
     init_temperature: float = 10.0
+    # Lower bound of the learnable temperature, and whether the balance loss
+    # may change it (see MemoryPool).
+    min_temperature: float = 1.0
+    balance_temperature_grad: bool = True
 
     @property
     def pool_size(self) -> int:

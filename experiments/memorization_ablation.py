@@ -16,7 +16,7 @@ are ever picked.
 
     KT_RESULTS=experiments/results/memorization python -m experiments.memorization_ablation train --gpus 0,1 --per_gpu 3
     KT_RESULTS=experiments/results/memorization python -m experiments.memorization_ablation analyze
-    (--gpus cpu runs on the CPU)
+    (--gpus cpu runs on the CPU; --round 2 for the temperature fixes)
 """
 
 from __future__ import annotations
@@ -44,6 +44,17 @@ ARMS = {
     "long": ["--steps", "6000"],
     "both_long": ["--steps", "6000", *ANNEAL, *REVIVE50],
 }
+# Round 2. Round 1 showed the cause: in 6 of 7 runs the learnable routing
+# temperature fell to its floor (1.0) and stayed there; routing then
+# concentrated and learning slowed. Two seeds per arm (runs also differ
+# from GPU nondeterminism, so one run per arm is not enough).
+SGT = ["--balance_temperature_grad", "false"]
+FLOOR = ["--min_temperature", "10.0"]
+ARMS2 = {}
+for name, flags, seeds in (("base", [], (1, 2)), ("sgt", SGT, (0, 1)), ("floor10", FLOOR, (0, 1)),
+                           ("fix", SGT + FLOOR, (0, 1))):
+    for seed in seeds:
+        ARMS2[f"{name}_s{seed}"] = ["--steps", "4000", "--seed", str(seed), *flags]
 
 
 def _done(arm):
@@ -108,6 +119,9 @@ def analyze(out_name="memorization.json"):
             "pool_spread": float(np.exp(-np.sum(p[p > 0] * np.log(p[p > 0]))) / mcfg.pool_size),
             "max_slot_share": float(p.max()),
             "subkeys_used": float(subkeys_used),
+            "temperature": float(np.exp(np.clip(np.asarray(params["pool"]["log_temperature"]),
+                                                np.log(mcfg.min_temperature), np.log(100.0)))),
+            "top1_weight": float(full["weights"].max(-1).mean()),
             "history": meta["history"],
             "train_seconds": meta.get("train_seconds"),
         }
@@ -122,8 +136,12 @@ if __name__ == "__main__":
     ap.add_argument("--gpus", default="0", help="comma-separated GPU ids, or 'cpu'")
     ap.add_argument("--per_gpu", type=int, default=1)
     ap.add_argument("--only", nargs="*")
+    ap.add_argument("--round", type=int, default=1)
     a = ap.parse_args()
+    if a.round == 2:
+        ARMS.clear()
+        ARMS.update(ARMS2)
     if a.cmd == "train":
         train(a.gpus.split(","), a.per_gpu, a.only)
     else:
-        analyze()
+        analyze("memorization.json" if a.round == 1 else "memorization2.json")
