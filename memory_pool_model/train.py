@@ -283,8 +283,10 @@ class Trainer:
             step=jnp.zeros((), jnp.int32),
             params=params,
             opt_state=opt_state,
-            subkey_usage=jnp.full((m.pool_heads, 2, m.n_sub_keys), 1.0 / m.n_sub_keys),
-            slot_usage=jnp.full((m.pool_size,), 1.0 / m.pool_size),
+            # explicit dtype: a weakly typed initial state would make the
+            # second step recompile (the step's outputs are strongly typed)
+            subkey_usage=jnp.full((m.pool_heads, 2, m.n_sub_keys), 1.0 / m.n_sub_keys, jnp.float32),
+            slot_usage=jnp.full((m.pool_size,), 1.0 / m.pool_size, jnp.float32),
             pool_m=pool_m,
             pool_v=pool_v,
         )

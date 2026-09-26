@@ -101,6 +101,20 @@ def test_temperature_floor_and_balance_gradient():
     assert g_bal == 0.0 and g_read != 0.0
 
 
+def test_state_types_are_stable_across_steps():
+    """Any dtype / weak-type / shape change in the state makes the next
+    jitted step recompile (it cost ~10 s per change on a T4)."""
+    ds = FactDataset(num_entities=16, num_relations=2, num_attributes=8, name_len=2)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=16, n_layers=2, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=8, d_value=8, top_k=2)
+    tr = Trainer(mcfg, TrainConfig(revive_threshold=1.0))
+    state = tr.init(jax.random.PRNGKey(0))
+    sig = lambda s: [(x.dtype, getattr(x, "weak_type", False), x.shape) for x in jax.tree_util.tree_leaves(s)]
+    s1, _, queries = tr.train_step(state, ds.sample(np.random.default_rng(0), 4), jax.random.PRNGKey(1))
+    s2, _ = tr.revive(s1, queries, jax.random.PRNGKey(2))
+    assert sig(state) == sig(s1) == sig(s2)
+
+
 def test_noise_anneal_schedule():
     from memory_pool_model.train import noise_scale_at
     assert noise_scale_at(TrainConfig(steps=100), 99) == 1.0  # default: never annealed
