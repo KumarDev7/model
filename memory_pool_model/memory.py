@@ -171,6 +171,11 @@ class MemoryPool(nn.Module):
         else:
             values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
             fetched = jnp.take(values, slots, axis=0)  # [M, H, k, d_value]
+            # Keep the gathered rows in row-major order. Otherwise XLA can
+            # pick a layout with d_value outermost to suit the consumer, and
+            # the gather then reads every row with scattered accesses (113 ms
+            # instead of ~8 ms per layer on a T4 at batch 32 x 256).
+            fetched = jax.lax.optimization_barrier(fetched.reshape(-1)).reshape(fetched.shape)
         out = jnp.einsum("mhk,mhkd->md", weights, fetched)
         out = out.reshape(*lead_shape, self.d_value)
 
