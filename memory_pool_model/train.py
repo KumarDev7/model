@@ -52,6 +52,16 @@ def phase_at(tcfg: TrainConfig, step: int) -> Dict[str, bool]:
     }
 
 
+def noise_scale_at(tcfg: TrainConfig, step):
+    """Routing-noise multiplier at `step` (1-based): 1 until
+    noise_anneal_start * steps, then linear down to 0 at noise_anneal_end."""
+    if tcfg.noise_anneal_start >= 1.0:
+        return 1.0
+    frac = step / tcfg.steps
+    span = max(tcfg.noise_anneal_end - tcfg.noise_anneal_start, 1e-6)
+    return jnp.clip((tcfg.noise_anneal_end - frac) / span, 0.0, 1.0)
+
+
 def _is_pool_path(path) -> bool:
     top = getattr(path[0], "key", "")
     return top == "pool" or top.startswith(("router_", "mem_gate_", "mem_out_"))
@@ -280,7 +290,7 @@ class Trainer:
 
     # ------------------------------------------------------------------ loss
     def _loss(self, params, batch, rng, train: bool, route: bool = False, nopool: bool = False,
-              probes=None):
+              probes=None, noise_scale=1.0):
         r_route, r_drop = jax.random.split(rng)
         logits, aux = self.model.apply(
             {"params": params},
@@ -289,6 +299,7 @@ class Trainer:
             route_through_pool=train and route,
             sparse_grad=probes is not None,
             probes=probes,
+            noise_scale=noise_scale,
             rngs={"routing": r_route, "dropout": r_drop},
         )
         ce = optax.softmax_cross_entropy_with_integer_labels(logits, batch["targets"])
@@ -348,6 +359,7 @@ class Trainer:
             nopool = t.nopool_kl_coef > 0 or t.nopool_true_coef > 0
         r_loss, r_sample = jax.random.split(rng)
         pool_m, pool_v = state.pool_m, state.pool_v
+        noise = noise_scale_at(t, state.step + 1)
 
         if self.sparse:
             values, rest = split_values(state.params)
@@ -357,7 +369,7 @@ class Trainer:
 
             def loss_fn(rest, probes):
                 return self._loss(merge_values(rest, values), batch, r_loss, True, route, nopool,
-                                  probes=probes)
+                                  probes=probes, noise_scale=noise)
 
             (_, (metrics, aux)), (g_rest, g_probe) = jax.value_and_grad(
                 loss_fn, argnums=(0, 1), has_aux=True)(rest, probes)
@@ -401,7 +413,8 @@ class Trainer:
             metrics["rows_updated"] = jnp.sum(uniq < self.mcfg.pool_size)
         else:
             grad_fn = jax.value_and_grad(self._loss, has_aux=True)
-            (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool)
+            (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool,
+                                                 noise_scale=noise)
             updates, opt_state = self.optimizer.update(grads, state.opt_state, state.params)
             if freeze:
                 # Stage 2: backbone frozen; only the pool path (pool, router,
@@ -410,6 +423,7 @@ class Trainer:
                     lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
             params = optax.apply_updates(state.params, updates)
             metrics["grad_norm"] = optax.tree.norm(grads)
+        metrics["noise_scale"] = jnp.asarray(noise, jnp.float32)
 
         subkey_usage, slot_usage = state.subkey_usage, state.slot_usage
         queries = jnp.zeros((0,))

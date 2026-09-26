@@ -77,6 +77,11 @@ class TrainConfig:
     revive_threshold: float = 0.1
     # Stop reviving after this fraction of training so the pool can settle.
     revive_until: float = 0.8
+    # Anneal the routing noise linearly from full strength at this fraction
+    # of training to zero at `noise_anneal_end`, so the last steps train on
+    # the same (clean) rows inference reads. 1.0 = keep the noise on.
+    noise_anneal_start: float = 1.0
+    noise_anneal_end: float = 1.0
 
     # ---- make the pool, not the backbone, carry the knowledge ----
     # Block answer-loss gradients through the residual/FFN path of memory

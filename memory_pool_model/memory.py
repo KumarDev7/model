@@ -85,12 +85,15 @@ class MemoryPool(nn.Module):
         return self.n_sub_keys**2
 
     def __call__(
-        self, queries: jax.Array, *, train: bool = False, sparse_grad: bool = False
+        self, queries: jax.Array, *, train: bool = False, sparse_grad: bool = False,
+        noise_scale: jax.Array | float = 1.0,
     ) -> Tuple[jax.Array, Dict[str, Any]]:
         """sparse_grad: don't differentiate through the value table. The
         trainer then builds gradients for just the fetched rows (see
         train.py), so gradient/optimizer work scales with rows used, not
-        with pool size."""
+        with pool size.
+        noise_scale: multiplies routing_noise (the trainer anneals it to 0 at
+        the end of training so the rows read in training match inference)."""
         lead_shape = queries.shape[:-2]
         H, n, k = self.heads, self.n_sub_keys, self.top_k
         half = self.d_key // 2
@@ -106,7 +109,7 @@ class MemoryPool(nn.Module):
         # Noise only changes *which* slots are selected, never their weights.
         if train and self.routing_noise > 0:
             gumbel = jax.random.gumbel(self.make_rng("routing"), scores.shape)
-            select_scores = scores + self.routing_noise * gumbel
+            select_scores = scores + self.routing_noise * noise_scale * gumbel
         else:
             select_scores = scores
 

@@ -36,6 +36,7 @@ class MemoryPoolLM(nn.Module):
         sparse_grad: bool = False,
         probes: Dict[int, jax.Array] | None = None,
         positions: jax.Array | None = None,
+        noise_scale: jax.Array | float = 1.0,
     ) -> Tuple[jax.Array, Dict[str, Any]]:
         """
         pool_off: skip the memory read (the backbone answers alone).
@@ -46,6 +47,7 @@ class MemoryPoolLM(nn.Module):
         sparse_grad / probes: used by the trainer's sparse pool update. The
           value table is read without gradient, and a zero probe is added to
           each layer's pool read so d(loss)/d(read) can be recovered.
+        noise_scale: multiplier on the routing noise (annealed by the trainer).
         """
         cfg = self.cfg
         B, T = tokens.shape
@@ -100,7 +102,7 @@ class MemoryPoolLM(nn.Module):
                     # Router: hidden state -> one query per pool head.
                     q = nn.Dense(cfg.pool_heads * cfg.d_key, name=f"router_{i}")(h)
                     q = q.reshape(B, T, cfg.pool_heads, cfg.d_key)
-                    mem, aux = pool(q, train=train, sparse_grad=sparse_grad)
+                    mem, aux = pool(q, train=train, sparse_grad=sparse_grad, noise_scale=noise_scale)
                     if probes is not None:
                         mem = mem + probes[i]
                     gate = nn.silu(nn.Dense(cfg.d_value, name=f"mem_gate_{i}")(h))

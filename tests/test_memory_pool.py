@@ -60,6 +60,17 @@ def test_noise_changes_selection_only_in_training():
     _, clean2 = pool.apply(params, q, train=False, rngs={"routing": jax.random.PRNGKey(4)})
     np.testing.assert_array_equal(clean["slots"], clean2["slots"])
     assert not np.array_equal(clean["slots"], noisy["slots"])
+    # annealed to zero: training reads exactly the rows inference reads
+    _, off = pool.apply(params, q, train=True, noise_scale=0.0, rngs=rngs)
+    np.testing.assert_array_equal(clean["slots"], off["slots"])
+
+
+def test_noise_anneal_schedule():
+    from memory_pool_model.train import noise_scale_at
+    assert noise_scale_at(TrainConfig(steps=100), 99) == 1.0  # default: never annealed
+    t = TrainConfig(steps=100, noise_anneal_start=0.6, noise_anneal_end=0.9)
+    got = [float(noise_scale_at(t, s)) for s in (10, 60, 75, 90, 100)]
+    np.testing.assert_allclose(got, [1.0, 1.0, 0.5, 0.0, 0.0], atol=1e-6)
 
 
 def test_balance_loss_detects_collapse():
