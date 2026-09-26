@@ -41,6 +41,7 @@ from flax import serialization
 
 from memory_pool_model.config import ModelConfig
 from memory_pool_model.data import TokenDataset
+from memory_pool_model.generate import Generator
 from memory_pool_model.model import MemoryPoolLM
 
 SEQ = 256
@@ -54,6 +55,8 @@ ARMS = {
     "pool_old": POOL + ["--balance_temperature_grad", "true", "--min_temperature", "1.0"],
     "dense": ["--use_memory", "false"],
 }
+PROMPTS = ["The heart is a muscular organ that", "In 1969, the first humans", "To make a simple bread, you need",
+           "The capital of France is"]
 FREQ_BUCKETS = [(0, 10), (10, 100), (100, 1_000), (1_000, 10_000), (10_000, 100_000), (100_000, 10**12)]
 
 
@@ -183,6 +186,11 @@ def analyze(data, out, n_windows):
     val_arr = np.load(os.path.join(data, "val.npy"), mmap_mode="r")
     ood_arr = np.load(os.path.join(data, "ood.npy"), mmap_mode="r")
     counts_train = np.load(os.path.join(data, "train_counts.npy"))
+    tok = None
+    if os.path.exists(os.path.join(data, "tokenizer.json")):
+        from tokenizers import Tokenizer
+
+        tok = Tokenizer.from_file(os.path.join(data, "tokenizer.json"))
     results = []
     for arm in ARMS:
         if not os.path.exists(os.path.join(out, "ckpt", arm + ".msgpack.json")):
@@ -212,6 +220,13 @@ def analyze(data, out, n_windows):
             row[name] = r
             per_split_counts[name] = sc
         row["generalization_gap"] = row["heldout"]["loss"] - row["train"]["loss"]
+        if tok is not None:  # greedy continuations, for a qualitative look
+            gen = Generator(mcfg, params)
+            row["samples"] = {}
+            for p in PROMPTS:
+                ids = np.asarray([tok.encode(p).ids], np.int32)
+                cont = gen.generate(ids, n_new=32)["tokens"][0].tolist()
+                row["samples"][p] = tok.decode(cont)
         if mcfg.use_memory:
             row["shared_vectors_heldout_vs_ood"] = []
             for i in range(len(mcfg.memory_layers)):
