@@ -2,8 +2,9 @@
 
 Data: Ultra-FineWeb English tokenised with a 16k BPE (prepare_ultrafineweb.py).
 Every arm has the same backbone (d_model 256, 4 layers, FFN x4) and the
-same token budget (~1.6 passes over the training set, so memorisation
-shows up as a train/held-out gap).
+same token budget: 6,000 steps x 32 x 256 tokens = 49M tokens, about 1.6
+passes over a 30M-token training set, so memorisation shows up as a
+train/held-out gap.
 
   dense       backbone alone
   pool        + 262k-vector pool read in layers 1 and 3 (defaults: pool read
@@ -12,8 +13,8 @@ shows up as a train/held-out gap).
   pool_nopen  pool without the no-pool penalty
   pool_old    pool with the old temperature settings (collapse check)
 
-    python -m experiments.text_study train --data /root/ufw/tok --out experiments/results/text --gpus 0,1 --per_gpu 3
-    python -m experiments.text_study analyze --data /root/ufw/tok --out experiments/results/text
+    python -m experiments.text_study train --data /root/ufw/tok30 --out experiments/results/text --gpus 0,1 --per_gpu 2
+    python -m experiments.text_study analyze --data /root/ufw/tok30 --out experiments/results/text
 
 The analysis measures, for held-out documents (same distribution), training
 windows, and Tiny Shakespeare (another domain): loss / perplexity with the
@@ -47,11 +48,11 @@ BACKBONE = ["--d_model", "256", "--n_layers", "4", "--n_heads", "8", "--ffn_mult
             "--max_len", str(SEQ), "--batch_size", "32", "--lr", "1e-3", "--warmup_steps", "500"]
 POOL = ["--memory_layers", "1,3", "--n_sub_keys", "512", "--d_key", "128", "--d_value", "256"]
 ARMS = {
-    "dense": ["--use_memory", "false"],
     "pool": POOL,
     "pool_ffn": POOL + ["--memory_ffn", "true"],
     "pool_nopen": POOL + ["--nopool_true_coef", "0.0"],
     "pool_old": POOL + ["--balance_temperature_grad", "true", "--min_temperature", "1.0"],
+    "dense": ["--use_memory", "false"],
 }
 FREQ_BUCKETS = [(0, 10), (10, 100), (100, 1_000), (1_000, 10_000), (10_000, 100_000), (100_000, 10**12)]
 
@@ -232,7 +233,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", required=True)
     ap.add_argument("--gpus", default="0")
     ap.add_argument("--per_gpu", type=int, default=1)
-    ap.add_argument("--steps", type=int, default=8000)
+    ap.add_argument("--steps", type=int, default=6000)
     ap.add_argument("--windows", type=int, default=1024, help="windows of 256 tokens per split in analyze")
     ap.add_argument("--only", nargs="*")
     a = ap.parse_args()
