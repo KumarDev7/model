@@ -61,7 +61,7 @@ All numbers from `experiments/results/final/gpu_validation.json` and
 
 | Check | Result |
 |---|---|
-| Knowledge in the pool (fact task, 16,384 facts) | **99.8%** accuracy; **0.01%** with the pool removed (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad) |
+| Knowledge in the pool (fact task, 16,384 facts) | **99.95-99.99%** accuracy (1-8 of 16,384 facts wrong, 6 runs with the default recipe), **0%** with the pool removed, 99.9-100% of the pool active, every slot reached (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad, routing-temperature fix; `experiments/results/memorization2/`, `memorization3/`). Before the temperature fix: 99.8% in the best run, 75.8% in the worst |
 | Sparse pool gradients | equal to dense gradients (test); only fetched rows change |
 | Pool bigger than GPU memory, training | 4.2M rows in host RAM: 2.25 s/step, 2.5 GB GPU, 4.3 GB RAM (on-GPU version runs out of memory) |
 | Same accuracy with the pool off the GPU | 98.3% host pool vs 97.9% device pool (same recipe, Adam) |
@@ -108,7 +108,7 @@ router.
 
 A trainable top-k memory tends to collapse: a few slots win early, only they
 get gradients, they get better, and they win even more. The rest of the pool
-is never used. This model uses five mechanisms against that:
+is never used. This model uses six mechanisms against that:
 
 1. **Cosine routing.** Queries and keys are L2-normalised and multiplied by a
    learned temperature, so no key can win just by growing its norm.
@@ -129,6 +129,25 @@ is never used. This model uses five mechanisms against that:
    and their Adam moments are cleared. Revival stops after `revive_until` of
    training so the pool can settle.
 
+6. **Routing-temperature guard** (`min_temperature`, `balance_temperature_grad`).
+   The balance loss could be lowered by flattening the router softmax
+   (lowering the learned temperature) instead of spreading usage, and a plain
+   clip had zero gradient at its lower bound. In 7 of 9 runs with the old
+   settings the temperature fell to 1.0 and stayed there: the 16 fetched
+   vectors per head were mixed almost equally (top weight 0.07), the Gumbel
+   noise decided every training pick, so usage *measured during training*
+   looked even while inference routing concentrated on 27-52% of the pool.
+   Those runs reached 75.8-99.5%. Now the temperature has a floor of 10 with
+   a straight-through clamp, and the balance loss can't change it: 6 of 6
+   runs reached 99.92-99.99% with 99.95-100% of the pool active
+   (`experiments/memorization_ablation.py`, rounds 1-2). Fading the routing
+   noise out at the end (`noise_anneal_start`) or training 6,000 steps on
+   top of the fix gave 2-4 facts wrong, within the 1-13 spread between
+   seeds, so both stay off by default (round 3). Results (per-run summaries
+   and accuracy by step) are in `experiments/results/memorization*/`; round 1
+   ran before the fix existed, so it used the old settings. Watch
+   `temperature` in the training log: it should rise (to ~20-30), not fall.
+
 Pool values also get a higher learning rate (`pool_lr_mult`), because each
 slot only gets gradient when it is fetched. They are excluded from weight
 decay so knowledge in rarely used slots is not erased.
@@ -143,6 +162,9 @@ These metrics are logged during training:
 * `slot_active_ema` is the fraction of slots with non-negligible use.
 * `subkey_spread` is the same measure per sub-key codebook.
 * `balance_loss` is ≈1.0 when balanced.
+* `temperature` is the learned routing sharpness. It should rise during
+  training; a temperature stuck at its floor means the mixing is uniform and
+  training-time usage numbers are dominated by the routing noise.
 * eval `pool_coverage` is the fraction of slots fetched at least once over the
   eval set with *no* noise, and eval `pool_spread` is the spread of that usage.
 
