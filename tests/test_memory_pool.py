@@ -511,3 +511,85 @@ def test_rowwise_adagrad_state_is_one_float_per_row():
     hp.update(np.array([3, 7, 1000]), np.ones((3, 64), np.float32), step=1, lr=0.1)  # 1000 = padding
     changed = np.flatnonzero(np.any(hp.values != before, axis=1))
     assert changed.tolist() == [3, 7] and hp.acc[3] == 1.0
+
+
+def _tiny(**tkw):
+    ds = FactDataset(num_entities=16, num_relations=2, num_attributes=8, name_len=2)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=16, n_layers=2, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=8, d_value=8, top_k=2)
+    return ds, Trainer(mcfg, TrainConfig(warmup_steps=1, **tkw))
+
+
+def test_stored_temperature_cannot_drift_past_its_bounds():
+    """The forward clamp is straight-through; the trainer projects the
+    stored value back so it can't wander below the floor unseen."""
+    ds, tr = _tiny()
+    s = tr.init(jax.random.PRNGKey(0))
+    below = {**s.params, "pool": {**s.params["pool"], "log_temperature": jnp.log(jnp.float32(0.5))}}
+    s = s.replace(params=below)  # e.g. an old checkpoint that had drifted
+    for i in range(3):
+        s, _, _ = tr.train_step(s, ds.sample(np.random.default_rng(i), 4), jax.random.PRNGKey(i))
+        lt = float(s.params["pool"]["log_temperature"])
+        assert np.log(tr.mcfg.min_temperature) - 1e-6 <= lt <= np.log(tr.mcfg.max_temperature) + 1e-6
+
+
+def test_pool_values_only_dense_updates():
+    ds, tr = _tiny(pool_values_only=True, sparse_pool_updates=False)
+    s0 = tr.init(jax.random.PRNGKey(0))
+    s1 = s0
+    for i in range(2):
+        s1, _, _ = tr.train_step(s1, ds.sample(np.random.default_rng(i), 4), jax.random.PRNGKey(i))
+    flat0 = jax.tree_util.tree_flatten_with_path(s0.params)[0]
+    for (path, a), b in zip(flat0, jax.tree_util.tree_leaves(s1.params)):
+        if _path_is(path, "pool", "values"):
+            assert not np.allclose(a, b)
+        else:
+            np.testing.assert_array_equal(a, b)
+
+
+def test_retention_phase_b_setup_runs_with_sparse_updates():
+    """experiments.knowledge_tests.retention re-inits the optimizer for phase B."""
+    import optax
+    from experiments.knowledge_tests import freeze_except_pool_values
+    ds, tr_a = _tiny()
+    state = tr_a.init(jax.random.PRNGKey(0))
+    state, _, _ = tr_a.train_step(state, ds.sample(np.random.default_rng(0), 4), jax.random.PRNGKey(0))
+    _, tr_b = _tiny()
+    tr_b.optimizer = optax.chain(tr_b.optimizer, freeze_except_pool_values())
+    fresh = tr_b.init(jax.random.PRNGKey(0))
+    st = state.replace(opt_state=fresh.opt_state, pool_m=fresh.pool_m, pool_v=fresh.pool_v)
+    for i in range(2):
+        st, _, _ = tr_b.train_step(st, ds.sample(np.random.default_rng(i), 4), jax.random.PRNGKey(i))
+    assert not np.allclose(st.params["pool"]["values"], state.params["pool"]["values"])
+    np.testing.assert_array_equal(st.params["embed"]["embedding"], state.params["embed"]["embedding"])
+
+
+def test_revived_usage_is_still_a_distribution():
+    H, C, n, d = 2, 2, 8, 4
+    keys = _l2_normalize(jax.random.normal(jax.random.PRNGKey(0), (H, C, n, d)))
+    usage = jax.random.dirichlet(jax.random.PRNGKey(1), jnp.full((n,), 0.3), (H, C))
+    queries = _l2_normalize(jax.random.normal(jax.random.PRNGKey(2), (32, H, C, d)))
+    _, new_usage, dead = revive_dead_keys(keys, usage, queries, jax.random.PRNGKey(3), 0.5)
+    assert int(dead.sum()) > 0
+    np.testing.assert_allclose(new_usage.sum(-1), 1.0, rtol=1e-5)
+
+
+def test_shuffle_reads_keeps_routing_but_changes_what_is_read():
+    pool, params, q = make_pool()
+    out, aux = pool.apply(params, q)
+    out_s, aux_s = pool.apply(params, q, shuffle_reads=True)
+    np.testing.assert_array_equal(aux["slots"], aux_s["slots"])
+    assert not np.allclose(out, out_s)
+    # it reads exactly the shifted rows
+    v = params["params"]["values"]
+    N = N_SUB**2
+    read = (aux["slots"] + N // 2 + 1) % N
+    manual = jnp.einsum("...hk,...hkd->...d", aux["weights"], v[read])
+    np.testing.assert_allclose(out_s, manual, rtol=1e-5, atol=1e-6)
+
+
+def test_eval_reports_shuffled_pool_accuracy():
+    ds, tr = _tiny()
+    s = tr.init(jax.random.PRNGKey(0))
+    ev = tr.evaluate(s.params, ds, 8)
+    assert {"acc_shuffled_pool", "ce_shuffled_pool"} <= set(ev)

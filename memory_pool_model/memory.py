@@ -118,14 +118,17 @@ class MemoryPool(nn.Module):
 
     def __call__(
         self, queries: jax.Array, *, train: bool = False, sparse_grad: bool = False,
-        noise_scale: jax.Array | float = 1.0,
+        noise_scale: jax.Array | float = 1.0, shuffle_reads: bool = False,
     ) -> Tuple[jax.Array, Dict[str, Any]]:
         """sparse_grad: don't differentiate through the value table. The
         trainer then builds gradients for just the fetched rows (see
         train.py), so gradient/optimizer work scales with rows used, not
         with pool size.
         noise_scale: multiplies routing_noise (the trainer anneals it to 0 at
-        the end of training so the rows read in training match inference)."""
+        the end of training so the rows read in training match inference).
+        shuffle_reads: ablation. Routing is unchanged, but every read fetches
+        another slot's vector (a fixed shift with no fixed points), so the
+        model gets well-formed but wrong knowledge."""
         lead_shape = queries.shape[:-2]
         H, n, k = self.heads, self.n_sub_keys, self.top_k
         half = self.d_key // 2
@@ -173,13 +176,14 @@ class MemoryPool(nn.Module):
 
         # Fetch and mix knowledge vectors; heads are summed.
         weights = jax.nn.softmax(slot_scores, axis=-1)
+        read_slots = (slots + self.pool_size // 2 + 1) % self.pool_size if shuffle_reads else slots
         if self.host_pool:
             from . import host_pool as hp
 
-            fetched = hp.fetch(self.host_pool, slots, self.d_value)  # [M, H, k, d_value]
+            fetched = hp.fetch(self.host_pool, read_slots, self.d_value)  # [M, H, k, d_value]
         else:
             values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
-            fetched = jnp.take(values, slots, axis=0)  # [M, H, k, d_value]
+            fetched = jnp.take(values, read_slots, axis=0)  # [M, H, k, d_value]
             # Keep the gathered rows in row-major order. Otherwise XLA can
             # pick a layout with d_value outermost to suit the consumer, and
             # the gather then reads every row with scattered accesses (113 ms
@@ -252,7 +256,8 @@ def revive_dead_keys(
 
     Args:
       sub_keys: [H, 2, n, d] pool sub-keys.
-      subkey_usage: [H, 2, n] EMA usage fractions (each [h, c] row sums to 1).
+      subkey_usage: [H, 2, n] EMA usage fractions (each [h, c] row sums to 1,
+        and still does after revival).
       queries: [M, H, 2, d] unit-norm query halves from recent batches.
       threshold: a key is dead if usage < threshold * (1 / n).
 
@@ -271,4 +276,6 @@ def revive_dead_keys(
     new_keys = jnp.where(dead[..., None], replacement, sub_keys)
     # Give revived keys a grace period at uniform usage.
     new_usage = jnp.where(dead, 1.0 / n, subkey_usage)
+    # keep each codebook's usage a distribution (the revived keys added mass)
+    new_usage = new_usage / new_usage.sum(axis=-1, keepdims=True)
     return new_keys, new_usage, dead

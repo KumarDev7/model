@@ -47,7 +47,9 @@ from memory_pool_model.model import MemoryPoolLM
 SEQ = 256
 BACKBONE = ["--d_model", "256", "--n_layers", "4", "--n_heads", "8", "--ffn_mult", "4",
             "--max_len", str(SEQ), "--batch_size", "32", "--lr", "1e-3", "--warmup_steps", "500"]
-POOL = ["--memory_layers", "1,3", "--n_sub_keys", "512", "--d_key", "128", "--d_value", "256"]
+# the no-pool penalty is off by default for text; these arms were run with it
+POOL = ["--memory_layers", "1,3", "--n_sub_keys", "512", "--d_key", "128", "--d_value", "256",
+        "--nopool_true_coef", "1.0"]
 ARMS = {
     "pool": POOL,
     "pool_ffn": POOL + ["--memory_ffn", "true"],

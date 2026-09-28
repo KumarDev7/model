@@ -87,6 +87,16 @@ def merge_values(rest, values):
     return {**rest, "pool": {**rest["pool"], "values": values}}
 
 
+def project_temperature(params, mcfg: ModelConfig):
+    """Keep the stored log-temperature inside [min, max]. The forward clamp
+    passes gradient straight through, so without this the parameter drifts
+    past a bound it is pushed against (the logged, clamped value hides it)
+    and has to climb all the way back before the temperature can move."""
+    pool = params["pool"]
+    log_t = jnp.clip(pool["log_temperature"], math.log(mcfg.min_temperature), math.log(mcfg.max_temperature))
+    return {**params, "pool": {**pool, "log_temperature": log_t}}
+
+
 def make_schedule(tcfg: TrainConfig):
     return optax.warmup_cosine_decay_schedule(
         0.0, tcfg.lr, tcfg.warmup_steps, max(tcfg.steps, tcfg.warmup_steps + 1), tcfg.lr * 0.1
@@ -422,6 +432,9 @@ class Trainer:
             (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool,
                                                  noise_scale=noise)
             updates, opt_state = self.optimizer.update(grads, state.opt_state, state.params)
+            if t.pool_values_only:
+                updates = jax.tree_util.tree_map_with_path(
+                    lambda p, u: u if _path_is(p, "pool", "values") else jnp.zeros_like(u), updates)
             if freeze:
                 # Stage 2: backbone frozen; only the pool path (pool, router,
                 # read gate/projection) keeps learning.
@@ -429,6 +442,8 @@ class Trainer:
                     lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
             params = optax.apply_updates(state.params, updates)
             metrics["grad_norm"] = optax.tree.norm(grads)
+        if self.mcfg.use_memory:
+            params = project_temperature(params, self.mcfg)
         metrics["noise_scale"] = jnp.asarray(noise, jnp.float32)
 
         subkey_usage, slot_usage = state.subkey_usage, state.slot_usage
@@ -500,12 +515,23 @@ class Trainer:
     def _eval_step(self, params, batch):
         _, (metrics, aux) = self._loss(params, batch, jax.random.PRNGKey(0), False)
         slot_counts = aux.get("slot_counts", jnp.zeros((1,)))
+        if self.mcfg.use_memory:
+            # Same routing, but every read returns another slot's vector.
+            # Unlike acc_nopool (which the no-pool penalty trains to be low),
+            # nothing in training targets this: a drop means the answers
+            # really come from what is stored in the pool.
+            logits, _ = self.model.apply({"params": params}, batch["inputs"], shuffle_pool=True)
+            mask = batch["mask"]
+            denom = jnp.maximum(mask.sum(), 1.0)
+            ce = optax.softmax_cross_entropy_with_integer_labels(logits, batch["targets"])
+            metrics["ce_shuffled_pool"] = (ce * mask).sum() / denom
+            metrics["acc_shuffled_pool"] = ((logits.argmax(-1) == batch["targets"]) * mask).sum() / denom
         return metrics, slot_counts, batch["mask"].sum()
 
     def evaluate(self, params, dataset, batch_size: int) -> Dict[str, float]:
         totals = {"ce": 0.0, "acc": 0.0}
         if self.mcfg.use_memory:
-            totals["acc_nopool"] = 0.0
+            totals.update(acc_nopool=0.0, acc_shuffled_pool=0.0, ce_shuffled_pool=0.0)
         n = 0.0
         slot_hits = None
         for batch in dataset.eval_batches(batch_size):
@@ -608,6 +634,9 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
             and tcfg.revive_every > 0
             and step % tcfg.revive_every == 0
             and step <= tcfg.revive_until * tcfg.steps
+            # revival rewrites sub-keys directly, which would move routing
+            # in a run that must change only the pool values
+            and not tcfg.pool_values_only
         ):
             state, revived = trainer.revive(state, queries, jax.random.fold_in(revive_key, step))
             revived = int(revived)
@@ -719,7 +748,11 @@ def main():
         seq_len = args.max_len or ModelConfig.max_len
         dataset = TextDataset(args.text_path, seq_len=seq_len)
         mcfg = _from_args(ModelConfig, args, vocab_size=256)
-    tcfg = _from_args(TrainConfig, args)
+    # The no-pool penalty targets fact answers. On text every token is
+    # scored, so it would punish the backbone for grammar too: off unless
+    # asked for (--nopool_true_coef 1.0).
+    task_defaults = {} if args.task == "facts" else {"nopool_true_coef": 0.0}
+    tcfg = _from_args(TrainConfig, args, **task_defaults)
     run(mcfg, tcfg, dataset, save_path=args.save, meta=meta, resume=args.resume)
 
 

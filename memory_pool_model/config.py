@@ -65,7 +65,10 @@ class ModelConfig:
 
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
-    steps: int = 3000
+    # The pool learns slower than a dense backbone (it must settle where each
+    # fact lives, and a slot only learns when read). Fact task, 2 seeds:
+    # 3,000 steps left 257-357 facts wrong, 6,000 left 1-8.
+    steps: int = 6000
     batch_size: int = 64
     lr: float = 3e-3
     warmup_steps: int = 200
@@ -104,7 +107,9 @@ class TrainConfig:
     # Same extra pass, penalising -log(1 - p_correct): the backbone is only
     # punished for knowing the right answer by itself.
     # Default 1.0: with memory_ffn=False this moved the fact task to 97.9%
-    # accuracy with the pool and 1.8% without it (knowledge in the pool).
+    # accuracy with the pool and 1.8% without it. That low no-pool number is
+    # what the penalty trains for; eval acc_shuffled_pool is the independent
+    # check. The CLI turns it off for --task text/tokens (every token scored).
     nopool_true_coef: float = 1.0
     # Warm starts: switch the options above on only after this many steps
     # (0 = from the start, or never for the *_after_step switches).

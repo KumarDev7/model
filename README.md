@@ -46,6 +46,12 @@ Three things make this work:
    accuracy, and only 1.8% with the pool removed. The old recipe gave 99.7% / 56.1%:
    the backbone had memorised half the facts itself.
    See `experiments/results/reliance*/`.
+   "Pool removed" is what the no-pool penalty trains for, so it is not proof
+   on its own. The independent check is `acc_shuffled_pool`: routing is left
+   alone but every read returns another slot's vector. Nothing in training
+   targets it, and it falls from 99.9% to 1.5-3.1% in every run, with or
+   without the penalty (`experiments/results/defaults_check/`). The answers
+   come from what the pool stores.
 2. **The pool can live off the GPU.** `pool_location="host"` keeps the value
    table in RAM, or on SSD with `pool_dir`. Training fetches only the rows a
    step uses and updates them on the host with lazy Adam. Inference reads
@@ -56,12 +62,15 @@ Three things make this work:
 
 ## Validated on 2x NVIDIA T4
 
-All numbers from `experiments/results/final/gpu_validation.json` and
-`experiments/results/reliance2/`. Test suite: 27/27 on CPU and on GPU.
+All numbers from `experiments/results/final/gpu_validation.json`,
+`experiments/results/reliance2/` and `experiments/results/defaults_check/`.
+Test suite: 39/39 on GPU.
 
 | Check | Result |
 |---|---|
-| Knowledge in the pool (fact task, 16,384 facts) | **99.95-99.99%** accuracy (1-8 of 16,384 facts wrong; 2 runs with the defaults, 4 more with noise fade-out or 6,000 steps on top), **0%** with the pool removed, 99.9-100% of the pool active, every slot reached (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad, routing-temperature fix; `experiments/results/memorization2/`, `memorization3/`). Before the temperature fix: 99.8% in the best run, 75.8% in the worst |
+| Knowledge in the pool (fact task, 16,384 facts) | **99.95-99.99%** accuracy (1-8 of 16,384 facts wrong; 2 runs with the defaults, 4 more with noise fade-out or 6,000 steps on top), **0%** with the pool removed, 99.9-100% of the pool active, every slot reached (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad, routing-temperature fix; `experiments/results/memorization2/`, `memorization3/`; those runs used 4,000-6,000 steps). Before the temperature fix: 99.8% in the best run, 75.8% in the worst |
+| Training length (fact task) | the pool needs ~5,000 steps: at 3,000, 17-357 facts wrong over 4 seeds (the pre-fix code too); 4,000 steps: 4 and 27; 6,000 (now the default): 1 and 8. A dense model with matched parameters reaches 100% by step 2,000, but keeps the facts in the backbone (`defaults_check/`, `dense_comparison.json`) |
+| Knowledge stored in the pool | pool reads shuffled (routing unchanged): **1.5-3.1%** accuracy in all 15 runs checked, with or without the no-pool penalty (random guessing: 0.4%) |
 | Sparse pool gradients | equal to dense gradients (test); only fetched rows change |
 | Pool bigger than GPU memory, training | 4.2M rows in host RAM: 2.25 s/step, 2.5 GB GPU, 4.3 GB RAM (on-GPU version runs out of memory) |
 | Same accuracy with the pool off the GPU | 98.3% host pool vs 97.9% device pool (same recipe, Adam) |
@@ -92,6 +101,11 @@ layers 1 and 3, 128 vectors per token. Results: `experiments/results/text/`.
 | pool (defaults: pool replaces FFN in 2 layers) | 74.3M | 88.8 | 174.9 | +0.07 | ~10^15 |
 | pool, no no-pool penalty | 74.3M | 88.3 | 174.2 | +0.08 | 88.5 |
 | pool, old temperature settings | 74.3M | 88.9 | 175.2 | +0.07 | ~10^14 |
+
+"Defaults" here means the recipe at the time, with the no-pool penalty on.
+On text the penalty scores every token, so it punishes the backbone for
+grammar as well as facts; `--task text` and `--task tokens` now leave it
+off unless `--nopool_true_coef` is given (`text_study.py` passes it).
 
 What this shows:
 
@@ -211,6 +225,9 @@ These metrics are logged during training:
   training-time usage numbers are dominated by the routing noise.
 * eval `pool_coverage` is the fraction of slots fetched at least once over the
   eval set with *no* noise, and eval `pool_spread` is the spread of that usage.
+* eval `acc_shuffled_pool` / `ce_shuffled_pool`: the same model with every
+  pool read returning another slot's vector. If the knowledge is in the pool
+  this should collapse; unlike `acc_nopool`, no loss term trains for it.
 
 ## Usage
 
@@ -219,10 +236,11 @@ pip install -r requirements.txt
 
 # Synthetic knowledge base: 4096 entities x 4 relations = 16k facts.
 # Entities are multi-token names, so facts can't hide in token embeddings.
-python -m memory_pool_model.train --task facts --steps 3000
+# 6,000 steps by default (the pool needs ~5,000 to store every fact).
+python -m memory_pool_model.train --task facts
 
 # Same backbone without the pool (baseline)
-python -m memory_pool_model.train --task facts --steps 3000 --use_memory false
+python -m memory_pool_model.train --task facts --use_memory false
 
 # Any text file, byte-level
 python -m memory_pool_model.train --task text --text_path input.txt \

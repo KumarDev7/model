@@ -461,7 +461,10 @@ def retention(entities: int = 2048, steps_a: int = 2500, steps_b: int = 1200, ev
             tr_b = Trainer(mcfg, tcfg_b)
             if mode == "pool_values_only":
                 tr_b.optimizer = optax.chain(tr_b.optimizer, freeze_except_pool_values())
-            st = state.replace(opt_state=tr_b.optimizer.init(state.params))
+            # fresh optimizer state shaped for this trainer: in sparse mode the
+            # pool values are outside the optax tree and have their own state
+            fresh = tr_b.init(jax.random.PRNGKey(0))
+            st = state.replace(opt_state=fresh.opt_state, pool_m=fresh.pool_m, pool_v=fresh.pool_v)
             log_b = [dict(r) for r in log]
             print(f"[retention] {kind}/{mode}: phase B", flush=True)
             _train(tr_b, st, B.sample, steps_b, 1, evals, every, False, log_b, offset=steps_a)

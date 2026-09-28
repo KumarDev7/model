@@ -42,7 +42,7 @@ from . import text_study as ts
 
 BACKBONE = ts.BACKBONE
 POOL = ["--memory_layers", "1,3", "--n_sub_keys", "512", "--d_key", "128", "--d_value", "256",
-        "--memory_ffn", "true"]
+        "--memory_ffn", "true", "--nopool_true_coef", "1.0"]  # penalty is off by default for text
 QS = ["--router_query_scale", "true"]
 ARMS = {
     "pool": POOL,
