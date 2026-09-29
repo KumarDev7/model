@@ -36,8 +36,9 @@ CKPT = os.path.join(RESULTS, "ckpt")
 # --------------------------------------------------------------------------
 # Training runs (each is a CLI invocation of memory_pool_model.train)
 # --------------------------------------------------------------------------
-MAIN_DATA = ["--num_entities", "4096", "--num_relations", "4"]  # 16,384 facts
-SWEEP_DATA = ["--num_relations", "4", "--name_len", "4"]  # entity count varies
+# these runs predate the routing_noise default of 0.1
+MAIN_DATA = ["--num_entities", "4096", "--num_relations", "4", "--routing_noise", "1.0"]  # 16,384 facts
+SWEEP_DATA = ["--num_relations", "4", "--name_len", "4", "--routing_noise", "1.0"]  # entity count varies
 
 RUNS: Dict[str, List[str]] = {
     # Main model: 4,096-slot pool, 16,384 facts (4 facts per slot).
@@ -436,7 +437,7 @@ def retention(entities: int = 2048, steps_a: int = 2500, steps_b: int = 1200, ev
     ds = FactDataset(num_entities=entities, num_relations=4)
     perm = np.random.default_rng(1).permutation(entities)
     A, B = FactSubset(ds, np.sort(perm[: entities // 2])), FactSubset(ds, np.sort(perm[entities // 2 :]))
-    base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len)
+    base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len, routing_noise=1.0)  # as run
     configs = {
         "memory": ModelConfig(**base),
         "dense_matched": ModelConfig(**base, use_memory=False, ffn_mult=9),

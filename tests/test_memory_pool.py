@@ -230,8 +230,11 @@ def test_training_reduces_loss(use_memory):
     assert np.isfinite(last) and last < first
     ev = trainer.evaluate(state.params, ds, 16)
     if use_memory:
+        # noise-free eval usage, not training-time slot_spread_ema: that one
+        # mostly measures the routing noise (0.53 at noise 1.0, 0.41 at 0.1
+        # here, with eval coverage 0.59 vs 0.61). A collapse gives ~1/N.
         assert ev["pool_coverage"] > 0.5
-        assert float(metrics["slot_spread_ema"]) > 0.5
+        assert ev["pool_active"] > 0.3 and ev["pool_spread"] > 0.15
 
 
 def test_eval_batches_cover_every_fact_once():
@@ -496,8 +499,11 @@ def test_kv_cache_decoding_matches_full_forward(location):
     toks = jax.random.randint(jax.random.PRNGKey(0), (2, 12), 0, 50)
     model = MemoryPoolLM(cfg)
     params = model.init(jax.random.PRNGKey(1), toks)["params"]
-    full, _ = model.apply({"params": params}, toks)
-    res = Generator(cfg, params, batch_size=2).generate(np.asarray(toks), n_new=3)
+    # full f32 matmuls: TPUs default to bf16 passes, and the cached and full
+    # paths then round differently (up to 0.03 on logits of ~3)
+    with jax.default_matmul_precision("highest"):
+        full, _ = model.apply({"params": params}, toks)
+        res = Generator(cfg, params, batch_size=2).generate(np.asarray(toks), n_new=3)
     np.testing.assert_allclose(res["logits"][:, :12], np.asarray(full), atol=1e-4)
     assert res["tokens"].shape == (2, 3)
 
@@ -593,3 +599,42 @@ def test_eval_reports_shuffled_pool_accuracy():
     s = tr.init(jax.random.PRNGKey(0))
     ev = tr.evaluate(s.params, ds, 8)
     assert {"acc_shuffled_pool", "ce_shuffled_pool"} <= set(ev)
+
+
+def test_zero_value_init_starts_silent_and_still_learns():
+    ds = FactDataset(num_entities=16, num_relations=2, num_attributes=8, name_len=2)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=16, n_layers=2, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=8, d_value=8, top_k=2, value_init_scale=0.0)
+    tr = Trainer(mcfg, TrainConfig(warmup_steps=1))
+    s = tr.init(jax.random.PRNGKey(0))
+    assert not np.any(s.params["pool"]["values"])
+    for i in range(2):  # the learning rate is 0 at step 0 (warmup)
+        s, _, _ = tr.train_step(s, ds.sample(np.random.default_rng(i), 4), jax.random.PRNGKey(i))
+    assert np.any(s.params["pool"]["values"])
+
+
+def test_decay_pool_path_option():
+    from memory_pool_model.train import make_optimizer
+    ds, tr = _tiny()
+    params = tr.init(jax.random.PRNGKey(0)).params
+    for on in (True, False):
+        # zero gradients: whatever moves is moved by weight decay alone
+        opt = make_optimizer(TrainConfig(decay_pool_path=on, lr=1.0, warmup_steps=1, weight_decay=0.5), clip=False)
+        state = opt.init(params)
+        zeros = jax.tree_util.tree_map(jnp.zeros_like, params)
+        for _ in range(2):  # step 0 has lr 0 (warmup)
+            upd, state = opt.update(zeros, state, params)
+        moved = {k for k, v in upd.items() if any(np.any(x) for x in jax.tree_util.tree_leaves(v))}
+        assert ("mem_out_1" in moved) == on and ("ffn_in_0" in moved)
+        assert "pool" not in moved
+
+
+def test_pick_agreement_tracks_routing_noise():
+    pool, params, q = make_pool(noise=0.0)
+    rngs = {"routing": jax.random.PRNGKey(3)}
+    assert float(pool.apply(params, q, train=True, rngs=rngs)[1]["pick_agreement"]) == 1.0
+    loud, _, _ = make_pool(noise=100.0)
+    quiet, _, _ = make_pool(noise=0.01)
+    a_loud = float(loud.apply(params, q, train=True, rngs=rngs)[1]["pick_agreement"])
+    a_quiet = float(quiet.apply(params, q, train=True, rngs=rngs)[1]["pick_agreement"])
+    assert a_loud < a_quiet <= 1.0

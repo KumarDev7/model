@@ -32,7 +32,9 @@ import numpy as np
 
 from . import knowledge_tests as kt
 
-BASE = ["--num_entities", "4096", "--num_relations", "4"]
+# routing_noise 1.0 and row-wise Adagrad: these runs predate the current defaults
+BASE = ["--num_entities", "4096", "--num_relations", "4", "--routing_noise", "1.0",
+        "--pool_optimizer", "rowwise_adagrad"]
 ANNEAL = ["--noise_anneal_start", "0.6", "--noise_anneal_end", "0.9"]
 REVIVE50 = ["--revive_until", "0.5"]
 # Round 1 ran before the temperature fix; OLD reproduces its settings.

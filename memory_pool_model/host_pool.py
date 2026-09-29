@@ -64,7 +64,7 @@ class HostPool:
 
     def __init__(self, n_slots: int, dim: int, path: Optional[str] = None,
                  trainable: bool = True, dtype=np.float32, seed: int = 0, name: Optional[str] = None,
-                 optimizer: str = "adam"):
+                 optimizer: str = "adam", init_scale: float = 1.0):
         if optimizer not in ("adam", "rowwise_adagrad"):
             raise ValueError(f"unknown pool optimizer {optimizer!r}")
         try:  # rows cross via a host callback, which needs JAX's CPU backend
@@ -78,6 +78,7 @@ class HostPool:
         self.trainable = trainable
         self.name = name or f"pool-{uuid.uuid4().hex[:8]}"
         self.optimizer = optimizer
+        self.init_scale = init_scale
         self.values = self._array("values", dtype, init=True, seed=seed)
         adam = trainable and optimizer == "adam"
         self.m = self._array("m", np.float32) if adam else None
@@ -100,11 +101,12 @@ class HostPool:
             if not fresh and (arr.shape != shape):
                 raise ValueError(f"{f} has shape {arr.shape}, expected {shape}")
         if init and fresh:
-            # same distribution as the on-device pool: normal(0, dim**-0.5)
+            # same distribution as the on-device pool: normal(0, init_scale * dim**-0.5)
             rng = np.random.default_rng(seed)
+            std = self.init_scale * self.dim**-0.5
             for s in range(0, self.n_slots, _INIT_CHUNK):
                 e = min(s + _INIT_CHUNK, self.n_slots)
-                arr[s:e] = (rng.standard_normal((e - s, self.dim)) * self.dim**-0.5).astype(dtype)
+                arr[s:e] = (rng.standard_normal((e - s, self.dim)) * std).astype(dtype)
         return arr
 
     def _state(self):

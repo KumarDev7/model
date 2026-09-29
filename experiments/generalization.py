@@ -133,7 +133,7 @@ def run(steps: int = 3000, every: int = 500) -> Dict:
     sp = splits(ds)
     out = {"entities_train": len(ds.train_ents), "entities_test": len(ds.test_ents),
            "exception_rate": float(ds.exception.mean()), "steps": steps, "models": {}}
-    base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len)
+    base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len, routing_noise=1.0)  # as run
     for kind, mcfg in {"memory": ModelConfig(**base),
                        "dense_matched": ModelConfig(**base, use_memory=False, ffn_mult=9)}.items():
         trainer = Trainer(mcfg, TrainConfig(steps=steps))

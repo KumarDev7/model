@@ -1,0 +1,114 @@
+{
+ "pool_ffn_sel_noise0.1": {
+  "history": [
+   {
+    "step": 1000,
+    "ce": 5.822006523609161,
+    "acc": 0.1604156494140625,
+    "acc_nopool": 0.1593780517578125,
+    "acc_shuffled_pool": 0.158599853515625,
+    "ce_shuffled_pool": 5.841594696044922,
+    "pool_coverage": 0.5497207641601562,
+    "pool_active": 0.5497207641601562,
+    "pool_spread": 0.13846224546432495
+   },
+   {
+    "step": 2000,
+    "ce": 5.189989805221558,
+    "acc": 0.19915771484375,
+    "acc_nopool": 0.1966400146484375,
+    "acc_shuffled_pool": 0.195343017578125,
+    "ce_shuffled_pool": 5.228219926357269,
+    "pool_coverage": 0.6452713012695312,
+    "pool_active": 0.6452713012695312,
+    "pool_spread": 0.16219277679920197
+   },
+   {
+    "step": 3000,
+    "ce": 4.835309267044067,
+    "acc": 0.2310333251953125,
+    "acc_nopool": 0.227874755859375,
+    "acc_shuffled_pool": 0.2263031005859375,
+    "ce_shuffled_pool": 4.896053671836853,
+    "pool_coverage": 0.7787628173828125,
+    "pool_active": 0.7787628173828125,
+    "pool_spread": 0.3209267854690552
+   },
+   {
+    "step": 4000,
+    "ce": 4.585849225521088,
+    "acc": 0.2608184814453125,
+    "acc_nopool": 0.2559051513671875,
+    "acc_shuffled_pool": 0.2533721923828125,
+    "ce_shuffled_pool": 4.6607202887535095,
+    "pool_coverage": 0.8037109375,
+    "pool_active": 0.8037109375,
+    "pool_spread": 0.3386198878288269
+   },
+   {
+    "step": 5000,
+    "ce": 4.467794418334961,
+    "acc": 0.272064208984375,
+    "acc_nopool": 0.2663116455078125,
+    "acc_shuffled_pool": 0.263519287109375,
+    "ce_shuffled_pool": 4.553786218166351,
+    "pool_coverage": 0.8158378601074219,
+    "pool_active": 0.8158378601074219,
+    "pool_spread": 0.35720324516296387
+   },
+   {
+    "step": 6000,
+    "ce": 4.416411519050598,
+    "acc": 0.276947021484375,
+    "acc_nopool": 0.27093505859375,
+    "acc_shuffled_pool": 0.267822265625,
+    "ce_shuffled_pool": 4.508480608463287,
+    "pool_coverage": 0.8197517395019531,
+    "pool_active": 0.8197517395019531,
+    "pool_spread": 0.35778146982192993
+   }
+  ],
+  "samples": {
+   "The heart is a muscular organ that": {
+    "greedy": " is a muscle, which is a muscle, which is a muscle, which is a muscle, is a muscle, which is a muscle, which is a muscle, which is a muscle, is a muscle, which is a muscle, which",
+    "t0.8_seed0": " can cause the liver to become a frequent cause. It can also be a common condition that can damage the pancreatic tissue.\nPerhaps in a bit where it is concerned with a skin. It can be a good balance and may also be",
+    "t0.8_seed1": " is called a chair of the child. The body is a \u201cnormal\u201d and the heart is called an a \u201cpromped of the group\u201d. Their body is called an aortic center that relies on the chest of the heart through a"
+   },
+   "In 1969, the first humans": {
+    "greedy": " were able to be able to be able to be able to be able to be able to be able to be able to be able to be able to be able to be able to be able to be able to be able to be able to",
+    "t0.8_seed0": " had the first humans sides, or as it had to be an alien real. The \"anynite,\" he knew in glory. One way, it was to choose a series of human beings, and merely \"nite,\"",
+    "t0.8_seed1": " were now being a new way to say a large library collection from Austria and was published in the UK. Once two developed people decided to prove his vision, the Dutch writers will write about what it is to be found in the 1970s"
+   },
+   "To make a simple bread, you need": {
+    "greedy": " to make a good idea of the way you can make a good idea of the way you can do to make a good idea of the way you can do to make a good idea of the way you can do to make a good idea of",
+    "t0.8_seed0": " to keep the ideas you could look for big numbers at your home. So, both at the next, you draw your positions on your sides.\nWhitheet, you'll have ever seen some of the things you've done on",
+    "t0.8_seed1": " a cookie, or schedule a cookie, so you can choose a cookie.\n- Check a cookie on a friendly page or a cookie, and then check a cookie pop-all your home.\n- Click"
+   },
+   "The capital of France is": {
+    "greedy": " a major factor in the United States. The government is a major factor in the United States. The government is a major factor in the United States. The government is a major factor in the United States. The government is a major factor in",
+    "t0.8_seed0": " still the continent, southeast and its entirety system, so it has been both at the next 4th century.\nThe expected way to be planned, but this is more meaningful in the countries and is largely shortstanding of the countries",
+    "t0.8_seed1": " owned by the chair of the city of the Middle East, the Austria and the Western structures and the land in the West. The work of the Jews, the Dutch cities, and the German peoples isna and the region is acting as"
+   },
+   "The best way to learn a new language is": {
+    "greedy": " to learn more about the world.\nThe first step is to learn how to learn and learn how to learn and learn how to learn and learn how to learn and learn how to learn.\nThe first step is to learn how to learn",
+    "t0.8_seed0": " to talk about the siabubite. For example, an argument like both a \"anynite,\" you should do things in a bit where it assists to choose a series of word and a few examples of word options.",
+    "t0.8_seed1": " to do with the first time to say words in word collection.\nWe all have to do the same thing in two ways:\n1 quiz points out: the paragraph letter letter letter letter letter letter letter letter letter letter letter letter letter letter"
+   },
+   "Climate change affects farmers because": {
+    "greedy": " they are not only a lot of time.\n- The most important thing to consider is that the farmers are not the same.\n- The farmers are not the same as the farmers.\n- The farmers are not the same as the",
+    "t0.8_seed0": " of the biomass, sulphurane production, and can lead to a real threat. This is important for farmers to reduce their expected quality.\nWhose assists to choose to reduce biomass from crop cultivation and balance among them. Although",
+    "t0.8_seed1": " of the Southeast Asia live in the North North America lived in the Ethiopia of South America and the West.\nHistory of the Southeast Asia, the Rignine Basin, the Northwest, and the eastern portion of the"
+   },
+   "Python is a programming language that": {
+    "greedy": " is a language that is a language that is a language that is a language that is a language that is a language that is a language that is a language that is a language that is a language that is a language that is a language that",
+    "t0.8_seed0": " can be used to connect into a network of all system to a single network, both at a certain level.\nThe purpose of this is to be the most assists to connect to a network as a set of software and then call the",
+    "t0.8_seed1": " is a programming language. By the middle of the library, the programming language is programming languages. Therefore, programming languages are developed in the language group, and there are also key functions that can be studied by executors.\nIn all"
+   },
+   "Once upon a time, in a small village,": {
+    "greedy": " the city is a great deal of the city.\n- The city is a great deal of the city, and the city is a great deal of the city.\n- The city is a great deal of the city.\n- The",
+    "t0.8_seed0": " you will need to connect into a new entry. For example, you will need both a phone of the back of your phone on your phone.\nTherefore, you will need to check for a short and long-term support of your phone",
+    "t0.8_seed1": " there are many different differences between the middle and large library collection.\nCryfuland structures are often still in two areas. The use of the common identifiers are key for a variety of users to detect any event's identification and document"
+   }
+  }
+ }
+}

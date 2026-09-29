@@ -1,0 +1,28 @@
+{
+ "note": "Ultra-FineWeb pool models (d256, 4 layers, FFN kept, 4 heads x top-4, query-scaled routing, 512 sub-keys, 67M-value pool read in layers 1 and 3). Measured on 16 held-out windows of 256 tokens. Copied from the probe logs (logs are gitignored).",
+ "noise_sweep": {
+  "model": "ref: routing_noise 1.0, 3,000 steps",
+  "clean_picks_kept_by_training_noise": {"1.0": [0.004, 0.003], "0.3": [0.229, 0.240], "0.1": [0.692, 0.704], "0.03": [0.901, 0.906], "0.01": [0.966, 0.967]},
+  "layers": [1, 3]
+ },
+ "probe": {
+  "noise_1.0_ref_3000_steps": {
+   "temperature": 10.0, "top1_weight": 0.298, "training_picks_matching_clean": [0.003, 0.003],
+   "values_median_relative_change_since_init": 0.065, "values_rows_moved_over_10pct": 0.0,
+   "layer1": {"read_rms": 1.013, "token_specific_share": 0.999, "gate_mean_abs": 0.182, "pool_branch_rms": 0.278, "shuffle_change_rms": 0.3133, "ffn_branch_rms": 11.53},
+   "layer3": {"read_rms": 1.014, "token_specific_share": 0.999, "gate_mean_abs": 0.221, "pool_branch_rms": 0.355, "shuffle_change_rms": 0.4186, "ffn_branch_rms": 27.732}
+  },
+  "noise_0.1_6000_steps": {
+   "temperature": 16.23, "top1_weight": 0.456, "training_picks_matching_clean": [0.891, 0.905],
+   "values_median_relative_change_since_init": 0.111, "values_rows_moved_over_10pct": 0.718,
+   "layer1": {"read_rms": 1.241, "token_specific_share": 0.998, "gate_mean_abs": 0.661, "pool_branch_rms": 4.819, "shuffle_change_rms": 5.3085, "ffn_branch_rms": 11.128},
+   "layer3": {"read_rms": 1.236, "token_specific_share": 0.998, "gate_mean_abs": 1.061, "pool_branch_rms": 7.037, "shuffle_change_rms": 8.5488, "ffn_branch_rms": 31.144}
+  },
+  "noise_1.0_6000_steps_previous_session": {
+   "note": "pool_ffn_sel, measured in the previous session (numbers from that session's probe output)",
+   "values_median_relative_change_since_init": 0.074, "values_rows_moved_over_10pct": 0.002,
+   "layer1": {"gate_mean_abs": 0.107, "pool_branch_rms": 0.337, "ffn_branch_rms": 10.889},
+   "layer3": {"gate_mean_abs": 0.173, "pool_branch_rms": 0.421, "ffn_branch_rms": 31.026}
+  }
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "pool read normally": {
+  "Once upon a time, there was a little girl named Lily.": {
+   "greedy": " She loved to play with her toys and eat yummy food. One day, she found a big, red apple in her kitchen. She was so happy and wanted to eat it all by herself.\nLily's mom saw her looking at the apple and said, \"Lily, don't eat that apple. It's not good for you.\" But Lily did not listen. She took a bite of the apple and it was very yummy. She wanted to eat it all by herself.\nLily's mom",
+   "t0.8_seed0": " She loved to learn to cook. One day, she wanted to make a big cake. She thought and thought. Lily had a great idea.\nLily went to the kitchen and found some flour. She put the flour, sugar, and milk in a bowl. She mixed the dough and sugar. She waited for the cake to bake. As she waited, the cake started to grow bigger and bigger. Lily was very happy.\nAfter some time, the cake was done. Lily took it out"
+  },
+  "Tom and his dog went to the park.": {
+   "greedy": " They saw a big tree with a swing. Tom wanted to play on the swing, but he was scared. He said, \"No, I am scared of the big tree. It is not safe.\"\nA nice lady saw Tom and his dog. She said, \"Don't be scared, Tom. The big tree is not safe. It is not safe. It is not safe. It is not safe.\"\nTom felt better. He said, \"Thank you, lady. I am",
+   "t0.8_seed0": " They saw birds, trees, and a big lake. Tom wanted to play near the lake, but he was scared. He did not want to disturb the ducks.\nTom's mom saw him looking sad. She said, \"Tom, you should not disturb the ducks. They might be dangerous. They might get hurt if you do not play with them. It is not safe to play with.\" Tom did not listen to his mom. He stayed away from the ducks.\nThe ducks did not"
+  },
+  "Sara wanted to bake a cake for her mom.": {
+   "greedy": " She asked her mom if she could have a cake. Her mom said yes, but she had to be careful.\nSara was very happy. She took a big bowl and filled it with flour. She put some flour, sugar, eggs, and milk in the bowl. She mixed them all together. She mixed them all together and put them in the oven. She waited for the cake to bake.\nWhen the cake was ready, Sara took it out of the oven. She put it on",
+   "t0.8_seed0": " She took the cake to the market.\nShe got some paper and started to fold the paper. She folded it into a circle. She made a big square, a square, a square, and a square. She was very proud of her work. She showed it to her mom.\n\"Look, mom, look at my cake!\" Sara said.\n\"It is a popular cake, Sara. I am proud of you. It has a lot of value. You deserve"
+  }
+ },
+ "pool reads shuffled": {
+  "Once upon a time, there was a little girl named Lily.": {
+   "greedy": " She was very eager to play with her toys. One day, Lily found a big box in the room. She was very excited to see what was inside.\nLily opened the box and found a big red ball. She was so happy! She played with the ball all day. But then, she saw a big red ball. She wanted to play with it. But the ball was too high. Lily tried to get it, but she could not.\nLily was sad. She thought she",
+   "t0.8_seed0": " She was excited to play with her new rubber ball. She loved to play with her friends and they would play fast.\nOne day, Lily and her friends went to the park. They played on a big sand hill. Lily's turn, but she was not good. She felt a serious face because she knew that would be a good friend.\nLily's turn on the ground and become a big surprise. She saw a funny-aup ball. She had it and the ball."
+  },
+  "Tom and his dog went to the park.": {
+   "greedy": " They played and had fun. Tom was happy. He liked to play with his dog.\nBut then, Tom's mom came to the park. She saw Tom and his dog. She said, \"Tom, you play with your dog. He is very happy. He is a good dog. He is a good dog. He is a good dog. He is a good dog. He is a good dog. He is a good dog. He is a good dog. He is a good",
+   "t0.8_seed0": " They saw the park to play with their ball. Tom and his dog played with the ball. They were happy.\nAt the park, they saw a big green man. The man looked at a label. He smiled and said, \"Hello, my dog! I know what is in the label box. It is a strange thing to see. It is not unknown to us.\" Tom and his dog smiled. They did not wonder what it was. They had a ball that was hiding"
+  },
+  "Sara wanted to bake a cake for her mom.": {
+   "greedy": " She asked her mom to make a cake for her. Her mom said, \"Yes, you can make a cake for your birthday. It is a big cake for your birthday.\"\nSara was very happy. She took a big bowl of flour and sugar. She mixed them in the bowl. She mixed them in the bowl. She mixed them in the bowl. She mixed them in the bowl. She mixed them in the bowl. She mixed them in the bowl. She mixed them in the bowl",
+   "t0.8_seed0": " She looked in the kitchen and found some flour. She mixed the flour and sugar. She mixed the flour and sugar and put sugar on the stove. She stirred the flour and sugar. She made a big, round and round begin.\nShe was very proud of her cake. She wanted to show her mom. She wanted to make a bigger cake. Her mom tried to teach her. She said, \"But, you can't make it. It is not too hot. It"
+  }
+ },
+ "pool removed": {
+  "Once upon a time, there was a little girl named Lily.": {
+   "greedy": " She loved to play with her toys and her friends. One day, Lily's mom told her to go to the bathroom. Lily was very excited and ran to the bathroom.\nWhen Lily got in the bathroom, she saw her mom waiting for her. She was very happy and excited. She wanted to play with her toys and her friends. But she forgot about the bathroom and started to play with her toys.\nWhen Lily's mom came out and saw her playing. She was angry and said",
+   "t0.8_seed0": " She was excited to go to her special igloo. She wanted to go inside, but there was a very difficult problem. Her mom said, \"I can do you, my mom will not give us to come back?\"\nLily thought hard, but she could still find the difficult igloo. She felt very sad. She decided to go back to her igloo. Lily told her mom, \"Please, I want you a big surprise.\"\nHer mom smiled and said, \"I have a surprise for"
+  },
+  "Tom and his dog went to the park.": {
+   "greedy": " They played on the swings and the slide. They had a lot of fun.\nBut then, Tom and his dog went to the park. They saw a big slide. Tom wanted to go first. He said his dog, his dog, his dog, his dog, hiss. He said his dog, his dog, his dog, hiss, his dog, hiss, hiss, and his dog. He said his dog, his dog, his dog, hiss, and",
+   "t0.8_seed0": " They played on the swings and slide. They had a lot of fun. Tom liked to whistle while he was nice. He whistled as loud as he heard the bell ring. He whistled so much.\nSoon, it got too late. Tom and his mom heard the bell ring. Their dad was angry. He called his friends. He always did not whistle like Tom.\nTom and his mom got a big surprise. They made the bell ring. It made a loud sound. It"
+  },
+  "Sara wanted to bake a cake for her mom.": {
+   "greedy": " She asked her mom to make a cake for her. Her mom said, \"Sara, can help me make the cake. She is very good.\"\nSara was very happy. She helped her mom make the cake. She put it in the oven. She waited for the cake to bake. She waited for the cake to bake. She waited for the cake to bake.\nWhen the cake was ready. It was ready. Sara and her mom took it out. It was ready to bake.",
+   "t0.8_seed0": " She took the cake to the market.\nSara got a big pan on the counter. She put the sugar in the hat, the eggs, the flour, the sugar, and the sugar. She was very happy. She showed the cake to her mom.\nMom smiled and said, \"That is a nice girl. She loved to bake. She liked to help people who were different and happy. But a lady who worked in the kitchen. She liked to talk to people who worked on"
+  }
+ }
+}

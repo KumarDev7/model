@@ -46,11 +46,12 @@ def _top_k_by_max(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
 
 
 def _top_k(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
-    """Top-k over the last axis. lax.top_k on a 2-D view on CPU/TPU (much
-    faster than N-D on CPU); repeated argmax on GPU, where XLA's top_k is
-    slow for small k."""
+    """Top-k over the last axis. lax.top_k on a 2-D view on CPU (much faster
+    than N-D there); repeated argmax on GPU and TPU, where XLA's top_k is slow
+    for small k (TPU v5e, 131k rows x 512, k=4: 11.5 ms vs 37 ms 2-D and
+    256 ms N-D; this made a TinyStories step 27x slower than without the pool)."""
     flat = x.reshape(-1, x.shape[-1])
-    if jax.default_backend() == "gpu" and k <= 32:
+    if jax.default_backend() != "cpu" and k <= 32:
         v, i = _top_k_by_max(flat, k)
     else:
         v, i = jax.lax.top_k(flat, k)
@@ -73,7 +74,7 @@ class MemoryPool(nn.Module):
     d_key: int
     d_value: int
     top_k: int
-    routing_noise: float = 1.0
+    routing_noise: float = 0.1  # see ModelConfig.routing_noise
     init_temperature: float = 10.0
     # Lower bound of the routing temperature. With a low bound the model can
     # flatten the mixing weights until the Gumbel noise decides every pick.
@@ -90,6 +91,10 @@ class MemoryPool(nn.Module):
     # Name of a registered host_pool.HostPool: the value table then lives in
     # host RAM / on SSD and fetched rows are copied in (no "values" param).
     host_pool: str = ""
+    # Initial values: normal(0, value_init_scale / sqrt(d_value)); 0 = zeros.
+    value_init_scale: float = 1.0
+    # Balance-loss usage from noise-free picks (costs a second top-k per layer).
+    balance_on_clean_picks: bool = True
 
     def setup(self):
         assert self.d_key % 2 == 0, "d_key must be even (split into two halves)"
@@ -104,7 +109,7 @@ class MemoryPool(nn.Module):
         if not self.host_pool:
             self.values = self.param(
                 "values",
-                nn.initializers.normal(stddev=self.d_value**-0.5),
+                nn.initializers.normal(stddev=self.value_init_scale * self.d_value**-0.5),
                 (self.n_sub_keys**2, self.d_value),
             )
         self.log_temperature = self.param(
@@ -204,8 +209,22 @@ class MemoryPool(nn.Module):
         subkey_counts = count_subkeys(jnp.stack([idx_a, idx_b], axis=2))
         # Load balancing is measured on the *clean* router so the noise can't
         # hide a collapse. f: fraction of top-k picks per sub-key (no grad).
-        clean_idx = sub_idx if select_scores is scores else _top_k(scores, k)[1]
+        # balance_on_clean_picks=False reuses the training picks instead and
+        # skips a second sub-key top-k per layer (small noise barely changes
+        # them); pick_agreement is then not measured (NaN).
+        clean = select_scores is scores or not self.balance_on_clean_picks
+        clean_idx = sub_idx if clean else _top_k(scores, k)[1]
         f = jax.lax.stop_gradient(count_subkeys(clean_idx) / (M * k))  # [H, 2, n]
+        # Share of the noisy sub-key picks that the clean router also makes.
+        # Near 0 means the noise, not the router, decides what training reads
+        # (Ultra-FineWeb, 512 sub-keys, routing_noise 1.0: 0.4% of the slots
+        # read in training were the slots inference reads).
+        if select_scores is scores:
+            pick_agreement = jnp.ones((), jnp.float32)
+        elif clean:
+            pick_agreement = jnp.full((), jnp.nan, jnp.float32)
+        else:
+            pick_agreement = jnp.mean(jnp.any(sub_idx[..., :, None] == clean_idx[..., None, :], axis=-1))
         # P: mean router probability for each sub-key (differentiable).
         p_scores = scores if self.balance_temperature_grad else cos * jax.lax.stop_gradient(temperature)
         P = jax.nn.softmax(p_scores, axis=-1).mean(axis=0)  # [H, 2, n]
@@ -223,6 +242,7 @@ class MemoryPool(nn.Module):
             "weights": weights.reshape(*lead_shape, H, k),
             "temperature": temperature,
             "top1_weight": jax.lax.stop_gradient(weights.max(-1).mean()),
+            "pick_agreement": jax.lax.stop_gradient(pick_agreement.astype(jnp.float32)),
         }
         return out, aux
 

@@ -43,7 +43,13 @@ class ModelConfig:
     top_k: int = 16
     # Scale of Gumbel noise added to routing scores while training
     # (exploration; prevents the router from locking onto a few slots early).
-    routing_noise: float = 1.0
+    # It must stay small next to the gaps between top routing scores, which
+    # shrink as n_sub_keys grows. At 1.0 on Ultra-FineWeb (512 sub-keys) only
+    # 0.4% of the slots read in training were the ones inference reads: the
+    # pool learned nothing and the backbone ignored it. At 0.1 about 90% match
+    # and the pool is used; the fact task reached 100% (99.99% at 1.0).
+    # Watch pick_agreement in the training log.
+    routing_noise: float = 0.1
     # Initial inverse temperature for cosine routing scores (learnable).
     init_temperature: float = 10.0
     # Lower bound of the learnable temperature, and whether the balance loss
@@ -57,6 +63,14 @@ class ModelConfig:
     max_temperature: float = 100.0
     # Scale routing scores by each query's length (per-token sharpness).
     router_query_scale: bool = False
+    # Initial pool values are normal(0, value_init_scale / sqrt(d_value));
+    # 0 starts the pool at zero. It did not change whether the backbone used
+    # the pool on Ultra-FineWeb (routing noise was the cause, see above).
+    value_init_scale: float = 1.0
+    # Measure balance-loss usage on noise-free picks (a second sub-key top-k
+    # per memory layer). False reuses the training picks: cheaper, and with
+    # small routing noise nearly the same; pick_agreement is then NaN.
+    balance_on_clean_picks: bool = True
 
     @property
     def pool_size(self) -> int:
@@ -73,6 +87,9 @@ class TrainConfig:
     lr: float = 3e-3
     warmup_steps: int = 200
     weight_decay: float = 0.01
+    # Weight-decay the pool read path (router, read gate, read projection).
+    # Turning it off did not change pool use on Ultra-FineWeb.
+    decay_pool_path: bool = True
     grad_clip: float = 1.0
     # Pool values are updated sparsely (only fetched rows get gradient), so
     # they get a larger learning rate than the backbone.
@@ -126,12 +143,15 @@ class TrainConfig:
     # Update only the pool rows fetched this step (lazy Adam). Gradient and
     # optimizer work then scale with rows used, not with pool size.
     sparse_pool_updates: bool = True
-    # Optimizer for the pool values: "rowwise_adagrad" (default; 1 float of
-    # state per row, ~1x the table, standard for very large embedding
-    # tables) or "adam" (2 moments per value, 3x). On the fact task
-    # rowwise_adagrad reached 99.8% (0.01% without the pool) vs Adam's
-    # 97.9% (1.8%), with more even pool usage. Needs sparse_pool_updates.
-    pool_optimizer: str = "rowwise_adagrad"
+    # Optimizer for the pool values: "adam" (default; lazy Adam on the rows
+    # read each step, 2 moments per value, so state is 2x the table) or
+    # "rowwise_adagrad" (1 float per row, ~1x the table in total, for pools
+    # too big to hold 3x). Row-wise Adagrad's step shrinks as a row gets
+    # read, so often-read rows nearly stop learning: on TinyStories lazy Adam
+    # made the pool's gain 4x larger (4,000 steps, loss 1.776 vs 1.835; dense
+    # backbone 1.857). Fact task, 2 seeds: 100% with either (Adagrad 99.99%).
+    # (With the old recipe Adagrad had looked better: 99.8% vs 97.9%.)
+    pool_optimizer: str = "adam"
     # Split each batch across all local devices (data parallel).
     data_parallel: bool = False
     # Save a resumable checkpoint every N steps (0 = only at the end).

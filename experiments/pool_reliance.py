@@ -21,7 +21,8 @@ import numpy as np
 
 from . import knowledge_tests as kt
 
-BASE = ["--num_entities", "4096", "--num_relations", "4", "--steps", "4000"]
+# routing_noise 1.0: these runs predate the 0.1 default
+BASE = ["--num_entities", "4096", "--num_relations", "4", "--steps", "4000", "--routing_noise", "1.0"]
 ARMS = {
     "base": [],
     "kl": ["--nopool_kl_coef", "1.0"],

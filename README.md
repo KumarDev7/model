@@ -64,11 +64,12 @@ Three things make this work:
 
 All numbers from `experiments/results/final/gpu_validation.json`,
 `experiments/results/reliance2/` and `experiments/results/defaults_check/`.
-Test suite: 39/39 on GPU.
+Test suite: 42/42 on GPU (T4) before the lazy-Adam default and
+`balance_on_clean_picks`; not yet re-run with those two changes.
 
 | Check | Result |
 |---|---|
-| Knowledge in the pool (fact task, 16,384 facts) | **99.95-99.99%** accuracy (1-8 of 16,384 facts wrong; 2 runs with the defaults, 4 more with noise fade-out or 6,000 steps on top), **0%** with the pool removed, 99.9-100% of the pool active, every slot reached (defaults: no memory-layer FFN, no-pool penalty, row-wise Adagrad, routing-temperature fix; `experiments/results/memorization2/`, `memorization3/`; those runs used 4,000-6,000 steps). Before the temperature fix: 99.8% in the best run, 75.8% in the worst |
+| Knowledge in the pool (fact task, 16,384 facts) | **99.95-99.99%** accuracy (1-8 of 16,384 facts wrong; 2 runs with the defaults, 4 more with noise fade-out or 6,000 steps on top), **0%** with the pool removed, 99.9-100% of the pool active, every slot reached (recipe at the time: no memory-layer FFN, no-pool penalty, row-wise Adagrad, routing noise 1.0, routing-temperature fix; `experiments/results/memorization2/`, `memorization3/`; those runs used 4,000-6,000 steps). Before the temperature fix: 99.8% in the best run, 75.8% in the worst |
 | Training length (fact task) | the pool needs ~5,000 steps: at 3,000, 17-357 facts wrong over 4 seeds (the pre-fix code too); 4,000 steps: 4 and 27; 6,000 (now the default): 1 and 8. A dense model with matched parameters reaches 100% by step 2,000, but keeps the facts in the backbone (`defaults_check/`, `dense_comparison.json`) |
 | Knowledge stored in the pool | pool reads shuffled (routing unchanged): **1.5-3.1%** accuracy in all 15 runs checked, with or without the no-pool penalty (random guessing: 0.4%) |
 | Sparse pool gradients | equal to dense gradients (test); only fetched rows change |
@@ -133,6 +134,60 @@ What this shows:
   fewer vectors per head) and far more training tokens are the next steps
   before the pool can hold knowledge the backbone lacks.
 
+### Why the pool was ignored on text: routing noise
+
+The runs above used `routing_noise=1.0`. Routing scores are cosines times
+a temperature of 10, and with 512 sub-keys per half the top scores sit very
+close together, so Gumbel noise of scale 1.0 decided almost every pick: only
+**0.4%** of the slots read in training were the slots inference reads. Each
+vector was trained by unrelated contexts, stayed near its random start (6-7%
+change), and the backbone learned to ignore the pool (shuffling the pool's
+reads changed nothing). Starting the pool at zero, 10x its learning rate, or
+no weight decay on the read path did not help (3,000-step screens, all with
+0.000 shuffle gap). Lowering the noise did. `routing_noise` is now 0.1 by default, and
+`pick_agreement` in the training log shows how many training picks the clean
+router agrees with. Results: `experiments/results/text_pool_usage/`.
+
+Same data and backbone, FFN kept, 4 heads x top-4 with query-scaled routing,
+no no-pool penalty, 6,000 steps. Held-out loss is the training-time eval
+(256 windows), so it is not comparable with the table above:
+
+| | noise 1.0 | noise 0.1 | dense |
+|---|---|---|---|
+| held-out loss (ppl) | 4.437 (84.5) | **4.416 (82.8)** | 4.429 (83.8) |
+| loss with pool reads shuffled | 4.437 (no effect) | 4.508 | - |
+| training picks = inference picks | 0.4% | ~90% | - |
+| vectors moved >10% from init | 0.2% | 72% | - |
+| pool branch / FFN branch (rms, layer 1) | 0.34 / 10.9 | 4.8 / 11.1 | - |
+
+The pool is now used and gives a small gain (1.2% perplexity, one seed).
+Generated text looks no better: at 7.9M backbone parameters and 30M
+tokens the backbone, not the pool, limits quality.
+
+### TinyStories: fluent text, and the pool optimizer
+
+On TinyStories (553M tokens, `experiments/prepare_tinystories.py`) the same
+4.3M-parameter backbone writes fluent stories, so the web-text output above
+was a data limit. There the pool's row-wise Adagrad turned out to be the next
+bottleneck (its step shrinks as a row is read); lazy Adam, still sparse, made
+the pool's gain about 4x larger and is now the default (`pool_optimizer`).
+4,000 steps on a T4, validation loss:
+
+| Model | time | loss |
+|---|---|---|
+| dense d256 | 866 s | 1.857 |
+| pool d256, row-wise Adagrad | 1,345 s | 1.835 |
+| pool d256, lazy Adam | 1,372 s | 1.776 |
+| dense d384 | 1,508 s | 1.701 |
+| pool d384, lazy Adam, top-8 | 2,185 s | 1.643 |
+| dense d512 | ~2,280 s | 1.626 (TPU run) |
+
+The pool clearly matters (removing it makes greedy decoding loop), and pool
+d384 roughly ties dense d512 at equal time with a third fewer parameters on
+the GPU, but it does not yet beat widening the backbone at equal compute. On
+TPU, `lax.top_k` had made the pool 27x slower than dense; the argmax top-k is
+now used on every accelerator. Full write-up: `docs/pool-fixes-report.md`.
+
 ## Layout
 
 | file | what |
@@ -172,7 +227,9 @@ is never used. This model uses six mechanisms against that:
    learned temperature, so no key can win just by growing its norm.
 2. **Gumbel routing noise** (`routing_noise`) while training. Noise changes
    only *which* slots are picked (exploration), never the mixing weights. It
-   is off at inference.
+   is off at inference. Keep it small next to the gaps between top routing
+   scores (default 0.1): with many sub-keys those gaps shrink, and too much
+   noise makes training read other slots than inference (`pick_agreement`).
 3. **Load-balancing loss** (`balance_coef`). This is a Switch-Transformer-style
    `n · Σ f_i · P_i` over every sub-key codebook, where `f` is the fraction of
    hard top-k picks and `P` is the mean router probability. It is computed on
@@ -218,6 +275,9 @@ These metrics are logged during training:
   use of the pool, 1/N = total collapse**. `_batch` is the current step and
   `_ema` is the running average.
 * `slot_active_ema` is the fraction of slots with non-negligible use.
+* `pick_agreement` is the share of the (noisy) training sub-key picks that
+  the clean router also makes. Near 0, the noise rather than the router
+  decides what training reads, and the pool cannot learn.
 * `subkey_spread` is the same measure per sub-key codebook.
 * `balance_loss` is ≈1.0 when balanced.
 * `temperature` is the learned routing sharpness. It should rise during

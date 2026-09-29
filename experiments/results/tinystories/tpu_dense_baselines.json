@@ -1,0 +1,8 @@
+{
+ "note": "TinyStories, TPU v5e-1 (Colab), 4,000-step schedule, batch 64 x 256, lr 1e-3, warmup 500, 4 layers, 8 heads, FFN x4. Validation ce copied from the training logs (the VM was reclaimed before the files were downloaded).",
+ "runs": {
+  "dense_d256": {"params": 4273664, "ce": {"1000": 2.431, "2000": 2.07, "3000": 1.918, "4000": 1.857}, "train_seconds_incl_compile": 88},
+  "dense_d384": {"params": 8769792, "ce": {"1000": 2.235, "2000": 1.91, "3000": 1.765, "4000": 1.702}, "train_seconds_incl_compile": 107},
+  "dense_d512": {"params": 14838784, "ce": {"1000": 2.163, "2000": 1.843, "3000": 1.693, "4000": 1.626}, "train_seconds_incl_compile": 124}
+ }
+}

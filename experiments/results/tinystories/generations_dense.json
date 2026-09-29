@@ -1,0 +1,113 @@
+{
+ "dense": {
+  "history": [
+   {
+    "step": 2000,
+    "ce": 2.0744998902082443,
+    "acc": 0.515289306640625
+   },
+   {
+    "step": 4000,
+    "ce": 1.8474840223789215,
+    "acc": 0.5518417358398438
+   },
+   {
+    "step": 6000,
+    "ce": 1.7565168589353561,
+    "acc": 0.56695556640625
+   },
+   {
+    "step": 8000,
+    "ce": 1.7027799040079117,
+    "acc": 0.575714111328125
+   },
+   {
+    "step": 10000,
+    "ce": 1.661992684006691,
+    "acc": 0.5840072631835938
+   },
+   {
+    "step": 12000,
+    "ce": 1.623449981212616,
+    "acc": 0.5907440185546875
+   },
+   {
+    "step": 14000,
+    "ce": 1.6011151820421219,
+    "acc": 0.5951385498046875
+   },
+   {
+    "step": 16000,
+    "ce": 1.5772606879472733,
+    "acc": 0.59979248046875
+   },
+   {
+    "step": 18000,
+    "ce": 1.5564434975385666,
+    "acc": 0.6032943725585938
+   },
+   {
+    "step": 20000,
+    "ce": 1.5374910533428192,
+    "acc": 0.6070556640625
+   },
+   {
+    "step": 22000,
+    "ce": 1.5238243341445923,
+    "acc": 0.6107025146484375
+   },
+   {
+    "step": 24000,
+    "ce": 1.512312412261963,
+    "acc": 0.6123428344726562
+   },
+   {
+    "step": 26000,
+    "ce": 1.501354306936264,
+    "acc": 0.6147918701171875
+   },
+   {
+    "step": 28000,
+    "ce": 1.4949872344732285,
+    "acc": 0.6152877807617188
+   },
+   {
+    "step": 30000,
+    "ce": 1.49176687002182,
+    "acc": 0.615997314453125
+   }
+  ],
+  "samples": {
+   "Once upon a time, there was a little girl named Lily.": {
+    "greedy": " She had a big, red ball. Lily loved to play with her ball every day. She would throw it, kick it, and roll it around.\nOne day, Lily saw a small, helpless bird on the ground. The bird was sad because it could not fly. Lily wanted to help the bird. She thought of a plan to make the bird happy.\nLily took the bird to her mom. Her mom said, \"Lily, you can help the bird. You can hold the bird and make it happy.\" Lily was so happy. She held the bird and they played together. The bird was happy too.\nThe moral of the story is that when we help others, we can make them happy too.",
+    "t0.8_seed0": " She had a small garden with lots of plants. She loved to look at the plants and plants that lived in a big garden.\nOne day, Lily saw a little frog near the garden. The frog was sad and wet. Lily wanted to help the frog, so she tried to tear the frog into small pieces.\nLily managed to tear the frog into small pieces and helped it get clean. She gave the frog a hug and said, \"Thank you, little frog.\"\nThe little frog was very happy to be with Lily. They became good friends and played together in the garden every day.\nThe moral of the story is to help others when they need it.",
+    "t0.8_seed1": " She had a gray cat named Fluffy. Fluffy liked to play with Lily and make her laugh.\nOne day, Lily and Fluffy were playing with a ball in the park. Fluffy saw a big cat and barked at it. Lily was scared, but Fluffy just wanted to play too. So, they played together and had lots of fun.\nSuddenly, the ball rolled away and got stuck in a tree. Fluffy and Lily felt sad. They tried to get the ball down, but it was too high. In the end, Fluffy caught the ball and gave it back to Lily. Lily said \"thank you\" to Fluffy for being so kind and gentle. They were happy and they played together for the rest of the day."
+   },
+   "Tom and his dog went to the park.": {
+    "greedy": " They saw a big tree with a lot of leaves. They wanted to climb the tree. Tom said, \"Let's climb the tree!\" The dog barked and wagged his tail. They climbed higher and higher.\nBut then, something unexpected happened. A big bird came and took Tom's toy. Tom and his dog were sad. They did not know what to do. Then, the bird came back with the toy. The bird gave the toy back to Tom and his dog. They were happy again. They played with the toy and had fun.",
+    "t0.8_seed0": " They saw a man with a big hat. The man had a long stick. The stick was cut. Tom and his dog ran to the man. They wanted to say hello.\nThe man said, \"Hello, my name is Tom and my dog. Can you help us?\" The man said, \"Yes, I would love to help. I will help you.\" He tried to cut the man's hair, but the cut was harsh. The man said, \"Please, ma'am. You have to pay for your haircut.\"\nThe man said, \"Sorry, I will pay for your haircut. But you have to wait for me. And you have to be careful and not make a mess.\" Tom and his dog took the man's hair and ran away.\nThe",
+    "t0.8_seed1": " They saw many trees and flowers and birds. They also saw a big hill with white flowers on the way. They wanted to go up and see the view.\n\"Can we go up the hill?\" Tom asked his dog. The dog barked happily. Tom and Spot wanted to see the view. They joined the hill and climbed up. They found many beautiful flowers and had a fun day at the park."
+   },
+   "One day, a small bird could not fly.": {
+    "greedy": " The bird was sad. It wanted to find a new home. The bird saw a big tree and thought, \"Maybe I can fly to the tree.\"\nThe bird flew to the tree and said, \"I will help you fly to the tree.\" The bird was happy. The bird started to fly. It was a good day. The bird was not sad anymore.\nBut then, something unexpected happened. The bird found a big, shiny rock. The rock was not a rock, it was a magic rock! The rock could talk! The rock said, \"Thank you, bird, for helping me. I will give you a wish.\" The bird was very happy. The bird wished for more friends to play with. The magic rock made all the friends come to the park. The",
+    "t0.8_seed0": " It was sad and frustrated. The bird sat on a branch and looked at the other birds. The bird was nice and let out a big sigh. The other birds sat on the branch and made a new sound.\nThe small bird had an idea. It said, \"Bird, I will help you fly. Let's try to fly together!\" The birds were happy and started to flap their wings. They flew up and up. Then, they saw the big bird again. But this time, the big bird was not mean. It just wanted to fly and have fun. So, the bird and the other birds helped the big bird learn. They all became good friends and played together every day.",
+    "t0.8_seed1": " The bird was sad. The bird was very hungry. It wanted to find some food. It flew around the town, looking for food. It saw a big bug. The bird wanted to bite the bug, but it was too big to fit in to eat.\nThe bird thought of a plan. It found a big leaf and put it under the leaf. The bird used the leaf to get on the bird. The bird was very happy. It could now fly and play with all its friends. They all had fun together in the sky."
+   },
+   "Sara wanted to bake a cake for her mom.": {
+    "greedy": " She put on her apron and went to the kitchen. She saw her mom making a cake. She said, \"Mom, can I help you bake the cake?\"\nHer mom said, \"Yes, Sara, you can help me. But first, let's make a cake together.\" Sara was happy. She helped her mom make the cake. They put the cake in the oven. It smelled so good.\nWhen the cake was done, Sara and her mom took it out. It smelled so good. They put it on the table. Sara said, \"Thank you, Mom, for helping me bake the cake.\" Her mom smiled and said, \"You're welcome, Sara. I'm glad you helped me.\"",
+    "t0.8_seed0": " She took the key to the kitchen and sat on the sofa. She opened the oven and let the sugar in. She took out the cake and put it in a big bowl. She put on a blue dress and a pink bow.\nShe waited for a while and then smelled something. She waited for a while. She wanted to make the cake. She opened the oven and saw a lot of candles. She saw a candle, a bowl, a spoon, and a spoon. She had a lot of cookies. She smiled.\n\"Mom, can I have a cookie now?\" she asked.\nMom looked at the cake. She smiled. She was happy. She took out the cake and gave it to her mom.\n\"I'm sorry, honey, I did",
+    "t0.8_seed1": " She put flour, eggs, and sugar in a big bowl. She put the white thing on the cake.\n\"Let me see what this is,\" Sara said. She took a small bite and made a face. \"Yuck! This is not chocolate. This is salt.\"\nShe was surprised and scared. She did not know what to do. She did not know what to say. She screamed for help.\nMom heard Sara's scream and ran to the kitchen. She saw the cake on the counter and the crack. She was shocked and angry.\n\"Sara! What have you done? You are very naughty!\" Mom said.\nShe grabbed the cake and the glass from Sara. She pulled it from the counter and pulled it away. She took Sara to the"
+   },
+   "The sun was hot, so Ben went to the lake.": {
+    "greedy": " He saw a big, green frog. The frog said, \"Hello, Ben! Do you want to play with me?\"\nBen said, \"Yes, I want to play with you!\" They played in the water and had lots of fun. They splashed and laughed. Ben and the frog became good friends.\nAfter playing, Ben and the frog were tired. They sat under a tree and talked. Ben said, \"I like playing with you, frog.\" The frog said, \"I like playing with you too, Ben.\" They both smiled and went home.",
+    "t0.8_seed0": " He saw the water to cool down. He had a fun day playing on the raft.",
+    "t0.8_seed1": " He saw many fish swimming in the lake. He wanted to learn more about the fish.\nBen met a wise old fish. The wise fish told Ben, \"I recommend a good place to eat. It is important to stay healthy to eat and take a rest.\" Ben thought about the fish and said, \"I will rest after we eat. I will be healthy, and you will be healthy.\"\nBen ate very fast and soon he was fast. He did not want to stop. But he also wanted to be healthy too. So, he waited for the sun to go down. When he did, he got tired and hungry. He ate and ate and ate, and soon he was full.\nBen was happy, and he did not need to be healthy. He"
+   },
+   "Once upon a time": {
+    "greedy": ", there was a little girl named Lily. She had a big, red ball. Lily loved to play with her ball every day. She would throw it, kick it, and roll it around.\nOne day, Lily saw a small, helpless bird on the ground. The bird was sad because it could not fly. Lily wanted to help the bird. She thought of a plan to make the bird happy.\nLily took the bird to her mom. Her mom said, \"Lily, you can help the bird. You can hold the bird and make it happy.\" Lily was so happy. She held the bird and they played together. The bird was happy too.\nThe moral of the story is that when we help others, we can make them happy too.",
+    "t0.8_seed0": ", in a small town, there lived a bald man named Tom. He was a very nice man who helped people. Tom loved to help people and make their home feel better. He had many friends in the town, and they all played together.\nOne day, Tom's friend, a little girl named Sue, decided to help him. She showed Tom how to make a big sandcastle. Tom was so happy to see Sue. They decided to bake the sandcastle together.\nAs they baked the sandcastle, Sue and Tom forgot their warning. When the sandcastle stopped, they went outside to play in the sandcastle. They had so much fun that they forgot all about the warning. The town became more beautiful and",
+    "t0.8_seed1": ", there was a charming little girl named Lily. She lived in a small house with her mom, dad, and her dog, Max. Lily loved to play outside in the sun. One day, Lily's mom asked her to come inside for a snack.\nLily went down into the kitchen and started to pack her bag with all her snacks. She put her favorite snack in the bag and carried it with her everywhere she went. As she walked home, she told her mom about her adventure and how she was so happy she had been so kind to her family.\nAfter a while, Lily's mom called her to come inside. Lily said goodbye to her new family, and they went back home. She was happy she had a great day, and she knew she would always be Susie"
+   }
+  }
+ }
+}

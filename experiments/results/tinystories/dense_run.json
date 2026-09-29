@@ -1,0 +1,147 @@
+{
+  "model": {
+    "vocab_size": 4096,
+    "max_len": 256,
+    "d_model": 256,
+    "n_layers": 4,
+    "n_heads": 8,
+    "ffn_mult": 4,
+    "dropout": 0.0,
+    "use_memory": false,
+    "memory_layers": [
+      1
+    ],
+    "memory_ffn": false,
+    "pool_location": "device",
+    "pool_dir": "",
+    "host_pool": "",
+    "n_sub_keys": 64,
+    "pool_heads": 4,
+    "d_key": 64,
+    "d_value": 128,
+    "top_k": 16,
+    "routing_noise": 0.1,
+    "init_temperature": 10.0,
+    "min_temperature": 10.0,
+    "balance_temperature_grad": false,
+    "max_temperature": 100.0,
+    "router_query_scale": false,
+    "value_init_scale": 1.0
+  },
+  "train": {
+    "steps": 30000,
+    "batch_size": 64,
+    "lr": 0.001,
+    "warmup_steps": 500,
+    "weight_decay": 0.01,
+    "decay_pool_path": true,
+    "grad_clip": 1.0,
+    "pool_lr_mult": 3.0,
+    "balance_coef": 0.01,
+    "key_diversity_coef": 0.01,
+    "usage_ema_decay": 0.99,
+    "revive_every": 100,
+    "revive_threshold": 0.1,
+    "revive_until": 0.8,
+    "noise_anneal_start": 1.0,
+    "noise_anneal_end": 1.0,
+    "route_through_pool": false,
+    "nopool_kl_coef": 0.0,
+    "nopool_true_coef": 0.0,
+    "nopool_after_step": 0,
+    "route_after_step": 0,
+    "freeze_backbone_after_step": 0,
+    "pool_values_only": false,
+    "sparse_pool_updates": true,
+    "pool_optimizer": "rowwise_adagrad",
+    "data_parallel": false,
+    "checkpoint_every": 2000,
+    "seed": 0,
+    "log_every": 250,
+    "eval_every": 2000
+  },
+  "history": [
+    {
+      "step": 2000,
+      "ce": 2.0744998902082443,
+      "acc": 0.515289306640625
+    },
+    {
+      "step": 4000,
+      "ce": 1.8474840223789215,
+      "acc": 0.5518417358398438
+    },
+    {
+      "step": 6000,
+      "ce": 1.7565168589353561,
+      "acc": 0.56695556640625
+    },
+    {
+      "step": 8000,
+      "ce": 1.7027799040079117,
+      "acc": 0.575714111328125
+    },
+    {
+      "step": 10000,
+      "ce": 1.661992684006691,
+      "acc": 0.5840072631835938
+    },
+    {
+      "step": 12000,
+      "ce": 1.623449981212616,
+      "acc": 0.5907440185546875
+    },
+    {
+      "step": 14000,
+      "ce": 1.6011151820421219,
+      "acc": 0.5951385498046875
+    },
+    {
+      "step": 16000,
+      "ce": 1.5772606879472733,
+      "acc": 0.59979248046875
+    },
+    {
+      "step": 18000,
+      "ce": 1.5564434975385666,
+      "acc": 0.6032943725585938
+    },
+    {
+      "step": 20000,
+      "ce": 1.5374910533428192,
+      "acc": 0.6070556640625
+    },
+    {
+      "step": 22000,
+      "ce": 1.5238243341445923,
+      "acc": 0.6107025146484375
+    },
+    {
+      "step": 24000,
+      "ce": 1.512312412261963,
+      "acc": 0.6123428344726562
+    },
+    {
+      "step": 26000,
+      "ce": 1.501354306936264,
+      "acc": 0.6147918701171875
+    },
+    {
+      "step": 28000,
+      "ce": 1.4949872344732285,
+      "acc": 0.6152877807617188
+    },
+    {
+      "step": 30000,
+      "ce": 1.49176687002182,
+      "acc": 0.615997314453125
+    }
+  ],
+  "train_seconds": 438.5998134613037,
+  "dataset": {
+    "train_tokens": "/content/ts/tok/train.npy",
+    "eval_tokens": "/content/ts/tok/val.npy",
+    "train_size": 552536548,
+    "eval_size": 5578295
+  }
+}

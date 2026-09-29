@@ -1,0 +1,27 @@
+{
+ "task": "facts, 16,384 facts, defaults, seed 0",
+ "runs": {
+  "noise1.0": {
+   "routing_noise": 1.0,
+   "steps": 6000,
+   "accuracy": 0.9999389657750726,
+   "facts_wrong": 1,
+   "accuracy_pool_removed": 0.0,
+   "accuracy_shuffled_pool": 0.01971435583254788,
+   "pool_active": 0.9990234375,
+   "pick_agreement_subkeys": 0.8323,
+   "temperature": 19.19
+  },
+  "noise0.1": {
+   "routing_noise": 0.1,
+   "steps": 6000,
+   "accuracy": 1.0,
+   "facts_wrong": 0,
+   "accuracy_pool_removed": 0.0,
+   "accuracy_shuffled_pool": 0.011108398659416707,
+   "pool_active": 0.99853515625,
+   "pick_agreement_subkeys": 0.9778,
+   "temperature": 16.25
+  }
+ }
+}

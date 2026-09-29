@@ -1,0 +1,26 @@
+{
+ "note": "TinyStories on 2x Tesla T4 (Kaggle), one run per GPU. 4,000 steps x 64 windows x 256 tokens, lr 1e-3, warmup 500, 4 layers, 8 heads, FFN x4, 4,096-token BPE. Pool arms: 512^2 slots x 256 dims read in layers 1 and 3 (unless noted), FFN kept, query-scaled routing, routing noise 0.1, no no-pool penalty. Values copied from the run metadata and logs printed during the session; the instance was reclaimed before the files were downloaded. ce = validation cross-entropy; ce_shuffled_pool = same model with every pool read returning another slot's vector.",
+ "runs": {
+  "dense_d256":       {"params_gpu": 4273664,  "train_seconds": 866,  "ce": {"1000": 2.43,  "2000": 2.07,  "3000": 1.918, "4000": 1.8571}, "acc": null},
+  "dense_d384":       {"params_gpu": 8769792,  "train_seconds": 1508, "ce": {"1000": 2.233, "2000": 1.911, "3000": 1.763, "4000": 1.7013}, "acc": 0.5804},
+  "dense_d512":       {"params_gpu": 14838784, "note": "T4 run not finished; measured 0.57 s/step over the first 250 steps (~2,280 s for 4,000). Loss from the TPU run: tpu_dense_baselines.json (1.626)."},
+  "pool_base":        {"flags": "top_k 4, pool_optimizer rowwise_adagrad (sparse)", "train_seconds": 1345, "ce": {"1000": 2.412, "2000": 2.045, "3000": 1.894, "4000": 1.835}, "acc": 0.5572, "acc_nopool": 0.5154, "ce_shuffled_pool_4000": 2.083},
+  "pool_adam":        {"flags": "top_k 4, dense Adam (sparse_pool_updates false)", "train_seconds": 1357, "ce": {"1000": 2.358, "2000": 1.988, "3000": 1.835, "4000": 1.7727}, "acc": 0.5671, "acc_nopool": 0.3982, "ce_shuffled_pool_4000": 2.852},
+  "pool_lazyadam":    {"flags": "top_k 4, lazy Adam (sparse)", "train_seconds": 1372, "ce": {"1000": 2.358, "2000": 1.992, "3000": 1.838, "4000": 1.7761}, "ce_shuffled_pool_4000": 2.819},
+  "pool_adam_k8":     {"flags": "top_k 8, dense Adam", "train_seconds": 1563, "ce": {"1000": 2.332, "2000": 1.964, "3000": 1.813, "4000": 1.7511}, "ce_shuffled_pool_4000": 3.165},
+  "pool_lazyadam_k8": {"flags": "top_k 8, lazy Adam", "train_seconds": 1536, "ce": {"1000": 2.331, "2000": 1.968, "3000": 1.814, "4000": 1.7536}, "acc": 0.5705, "acc_nopool": 0.3583, "ce_shuffled_pool_4000": 3.155},
+  "pool_4layers":     {"flags": "top_k 8, lazy Adam, memory_layers 0,1,2,3, balance_on_clean_picks false", "train_seconds": 2065, "ce": {"1000": 2.285, "2000": 1.921, "3000": 1.769, "4000": 1.7072}, "acc": 0.5793, "acc_nopool": 0.2539, "ce_shuffled_pool_4000": 4.029},
+  "pool_d384":        {"flags": "d_model 384, top_k 8, lazy Adam, balance_on_clean_picks false", "params_gpu": 9558528, "train_seconds": 2185, "ce": {"1000": 2.186, "2000": 1.855, "3000": 1.704, "4000": 1.6433}, "acc": 0.5887, "acc_nopool": 0.4281, "ce_shuffled_pool_4000": 2.631}
+ },
+ "facts_pool_optimizer": {
+  "note": "Fact task (16,384 facts), current defaults, 6,000 steps, T4.",
+  "rowwise_adagrad": {"seed0": {"acc": 0.9999, "acc_shuffled_pool": 0.01166, "pool_active": 0.9963}, "seed1": {"acc": 1.0, "acc_shuffled_pool": 0.01337, "pool_active": 0.9946}},
+  "lazy_adam":       {"seed0": {"acc": 1.0, "acc_shuffled_pool": 0.007263, "pool_active": 0.999}, "seed1": {"acc": 1.0, "acc_shuffled_pool": 0.006653, "pool_active": 0.999}}
+ },
+ "speed": {
+  "tpu_v5e_pool_layer_ms": {"note": "one pool layer, 16,384 tokens, 4 heads, 512 sub-keys, top-4", "lax.top_k N-D": 255.74, "lax.top_k 2-D": 37.21, "argmax x4": 11.52,
+                            "forward before": 74.73, "forward after": 41.67, "fwd+bwd before": 93.73, "fwd+bwd after": 62.47},
+  "tpu_v5e_step_seconds": {"dense_d256": 0.012, "pool before top-k fix": 0.33, "pool after": 0.19},
+  "t4_pool_layer_fwd_bwd_ms": {"balance_on_clean_picks true": 47.65, "false": 41.77}
+ }
+}

@@ -47,9 +47,11 @@ from memory_pool_model.model import MemoryPoolLM
 SEQ = 256
 BACKBONE = ["--d_model", "256", "--n_layers", "4", "--n_heads", "8", "--ffn_mult", "4",
             "--max_len", str(SEQ), "--batch_size", "32", "--lr", "1e-3", "--warmup_steps", "500"]
-# the no-pool penalty is off by default for text; these arms were run with it
+# the no-pool penalty is off by default for text, and routing noise is now
+# 0.1 and the pool optimizer lazy Adam by default; these arms were run with
+# the penalty, noise 1.0 and row-wise Adagrad
 POOL = ["--memory_layers", "1,3", "--n_sub_keys", "512", "--d_key", "128", "--d_value", "256",
-        "--nopool_true_coef", "1.0"]
+        "--nopool_true_coef", "1.0", "--routing_noise", "1.0", "--pool_optimizer", "rowwise_adagrad"]
 ARMS = {
     "pool": POOL,
     "pool_ffn": POOL + ["--memory_ffn", "true"],

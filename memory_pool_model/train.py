@@ -112,7 +112,8 @@ def make_optimizer(tcfg: TrainConfig, clip: bool = True) -> optax.GradientTransf
         # Decay backbone matrices only; decaying the pool would erase knowledge
         # stored in slots that simply weren't fetched in this batch.
         return jax.tree_util.tree_map_with_path(
-            lambda p, x: x.ndim >= 2 and not _path_is(p, "pool"), params
+            lambda p, x: x.ndim >= 2 and not _path_is(p, "pool")
+            and (tcfg.decay_pool_path or not _is_pool_path(p)), params
         )
 
     def scale_pool_values(mult: float) -> optax.GradientTransformation:
@@ -217,7 +218,7 @@ class Trainer:
             if mesh is not None:
                 raise NotImplementedError("host pool with data parallel is not supported yet")
             self.host = HostPool(mcfg.pool_size, mcfg.d_value, path=mcfg.pool_dir or None, seed=tcfg.seed,
-                                 optimizer=tcfg.pool_optimizer)
+                                 optimizer=tcfg.pool_optimizer, init_scale=mcfg.value_init_scale)
             mcfg = dataclasses.replace(mcfg, host_pool=self.host.name)
         elif mcfg.pool_location != "device":
             raise ValueError(f"unknown pool_location {mcfg.pool_location!r}")
@@ -332,6 +333,7 @@ class Trainer:
                 key_diversity=div,
                 temperature=aux["temperature"],
                 top1_weight=aux["top1_weight"],
+                pick_agreement=aux["pick_agreement"],
             )
         use_nopool = self.mcfg.use_memory and (not train or nopool)
         if use_nopool:

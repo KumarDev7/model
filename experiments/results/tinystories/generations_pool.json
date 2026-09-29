@@ -1,0 +1,126 @@
+{
+ "pool": {
+  "history": [
+   {
+    "step": 2000,
+    "ce": 2.050338238477707,
+    "acc": 0.5194625854492188,
+    "acc_nopool": 0.48365020751953125,
+    "acc_shuffled_pool": 0.4754791259765625,
+    "ce_shuffled_pool": 2.2669167816638947,
+    "pool_coverage": 0.8035163879394531,
+    "pool_active": 0.66845703125,
+    "pool_spread": 0.2443309724330902
+   },
+   {
+    "step": 4000,
+    "ce": 1.8274283707141876,
+    "acc": 0.5563583374023438,
+    "acc_nopool": 0.5109405517578125,
+    "acc_shuffled_pool": 0.49677276611328125,
+    "ce_shuffled_pool": 2.095007449388504,
+    "pool_coverage": 0.8162879943847656,
+    "pool_active": 0.6840629577636719,
+    "pool_spread": 0.2561163604259491
+   },
+   {
+    "step": 6000,
+    "ce": 1.7373810559511185,
+    "acc": 0.5687484741210938,
+    "acc_nopool": 0.5196914672851562,
+    "acc_shuffled_pool": 0.5077285766601562,
+    "ce_shuffled_pool": 2.0335749089717865,
+    "pool_coverage": 0.8294868469238281,
+    "pool_active": 0.7019615173339844,
+    "pool_spread": 0.2708036005496979
+   },
+   {
+    "step": 8000,
+    "ce": 1.6830152124166489,
+    "acc": 0.5803985595703125,
+    "acc_nopool": 0.5273666381835938,
+    "acc_shuffled_pool": 0.5118865966796875,
+    "ce_shuffled_pool": 2.0000163912773132,
+    "pool_coverage": 0.838958740234375,
+    "pool_active": 0.7147712707519531,
+    "pool_spread": 0.27925893664360046
+   },
+   {
+    "step": 10000,
+    "ce": 1.6379546821117401,
+    "acc": 0.588531494140625,
+    "acc_nopool": 0.53082275390625,
+    "acc_shuffled_pool": 0.5154876708984375,
+    "ce_shuffled_pool": 1.9678104519844055,
+    "pool_coverage": 0.8370704650878906,
+    "pool_active": 0.7121124267578125,
+    "pool_spread": 0.2791651487350464
+   },
+   {
+    "step": 12000,
+    "ce": 1.6038755923509598,
+    "acc": 0.5940628051757812,
+    "acc_nopool": 0.5362625122070312,
+    "acc_shuffled_pool": 0.5219802856445312,
+    "ce_shuffled_pool": 1.943222925066948,
+    "pool_coverage": 0.8414573669433594,
+    "pool_active": 0.7179679870605469,
+    "pool_spread": 0.28599032759666443
+   },
+   {
+    "step": 14000,
+    "ce": 1.5762668997049332,
+    "acc": 0.5990219116210938,
+    "acc_nopool": 0.540191650390625,
+    "acc_shuffled_pool": 0.5227203369140625,
+    "ce_shuffled_pool": 1.9292086958885193,
+    "pool_coverage": 0.8460655212402344,
+    "pool_active": 0.7236099243164062,
+    "pool_spread": 0.29024502635002136
+   },
+   {
+    "step": 16000,
+    "ce": 1.5532835274934769,
+    "acc": 0.6038742065429688,
+    "acc_nopool": 0.5427474975585938,
+    "acc_shuffled_pool": 0.5275802612304688,
+    "ce_shuffled_pool": 1.9133905172348022,
+    "pool_coverage": 0.8471031188964844,
+    "pool_active": 0.7255859375,
+    "pool_spread": 0.2944733798503876
+   }
+  ],
+  "samples": {
+   "Once upon a time, there was a little girl named Lily.": {
+    "greedy": " She loved to play with her toys and eat yummy food. One day, she found a big, red apple in her kitchen. She was so happy and wanted to eat it all by herself.\nLily's mom saw her looking at the apple and said, \"Lily, don't eat that apple. It's not good for you.\" But Lily did not listen. She took a bite of the apple and it was very yummy. She wanted to eat it all by herself.\nLily's mom saw her and said, \"Lily, you should not eat that apple. It's not good for you.\" Lily felt sad and said, \"I'm sorry, Mom. I will not eat it.\" Her mom smiled and said, \"It's okay, Lily. We can eat it together.\"",
+    "t0.8_seed0": " She loved to learn to cook. One day, she wanted to make a big cake. She thought and thought. Lily had a great idea.\nLily went to the kitchen and found some flour. She put the flour, sugar, and milk in a bowl. She mixed the dough and sugar. She waited for the cake to bake. As she waited, the cake started to grow bigger and bigger. Lily was very happy.\nAfter some time, the cake was done. Lily took it out of the oven. She made a big, sweet cake. This time, she made a big cake. Lily was so proud and happy. She ate the cake and felt so good. The end.",
+    "t0.8_seed1": " She had a big, hairy dog named Max. They loved to play and laugh in the sun. One day, Lily and Max were playing with a ball in the park.\nLily saw a small butterfly with a hurt wing. The butterfly was sad and scared. Lily wanted to help the butterfly, so she kneeled down and put her hand on the hurt little bird. The bird was hurt and could not fly.\nLily and Max wanted to help the butterfly. They took care of it and soon the hurt wing became better. The little bird could fly again. Lily and Max were very happy, and they played together all day."
+   },
+   "Tom and his dog went to the park.": {
+    "greedy": " They saw a big tree with a swing. Tom wanted to play on the swing, but he was scared. He said, \"No, I am scared of the big tree. It is not safe.\"\nA nice lady saw Tom and his dog. She said, \"Don't be scared, Tom. The big tree is not safe. It is not safe. It is not safe. It is not safe.\"\nTom felt better. He said, \"Thank you, lady. I am sorry I was scared of the big tree. I will not go near the big tree. I will be careful.\"\nThe lady smiled and said, \"That's good, Tom. I am glad you are safe. You are a good dog. You are a good dog. I am proud of",
+    "t0.8_seed0": " They saw birds, trees, and a big lake. Tom wanted to play near the lake, but he was scared. He did not want to disturb the ducks.\nTom's mom saw him looking sad. She said, \"Tom, you should not disturb the ducks. They might be dangerous. They might get hurt if you do not play with them. It is not safe to play with.\" Tom did not listen to his mom. He stayed away from the ducks.\nThe ducks did not like Tom's actions. They told him, \"You are too foolish and selfish. You should be brave and strong. Now you have to learn from the pond.\" Tom was sad and went back to playing with his friends. He learned that playing with friends is fun, but it is also important",
+    "t0.8_seed1": " They saw many trees and flowers and birds. They also saw a big swallow. They saw a pond with ducks and fish. They wanted to feed them some fish.\n\"Can we feed the ducks?\" Tom asked his dog. He was shy, but he wanted to be friends with the ducks.\n\"No, Tom, we can't feed the ducks. They are too delicate for them. We have no friends,\" his dog said.\nTom and his dog did not listen. He thought the ducks were cute and noisy. He threw a stick around the pond and tried to catch the ducks, but he lost his hand. He was sad and scared.\n\"Maybe the ducks are too close to our home,\" Tom cried. \"Maybe the ducks are not safe to pet them"
+   },
+   "One day, a small bird could not fly.": {
+    "greedy": " The bird was sad. It wanted to find a place to rest. The bird saw a big tree and thought it would be a good place to rest.\nThe bird flew to the tree and found a nice spot under the tree. The bird sat on the tree and rested. The bird felt happy and safe. The bird was not sad anymore.",
+    "t0.8_seed0": " The small bird was sad. The big bird had a friend. The small bird liked to whistle too. The large bird whistled a happy song.\nThe large bird sat on a branch. The large bird told the small bird that the large bird could whistle. The small bird tried and tried, but the small bird could not whistle. The small bird did not know what to do. The large bird had a big plan.\nThe large bird flew up to the small bird. The small bird whistled a soft song. The small bird got the large bird's whistle. The small bird was very happy. They whistled and danced together. The large bird was not sad anymore.",
+    "t0.8_seed1": " The bird wanted to fly high and see the world. The small bird looked up at the sky for a friend. The small bird was happy and started to fly.\nAs the bird flew, it saw a big bird. The big bird was hungry. The small bird wanted to help the big bird. It flew far away from the sky. The small bird had an idea. It flew to a tall tree.\nThe small bird climbed up the tree and picked some food. The big bird ate the food and felt strong. The small bird was happy and strong. The small bird learned that it is good to help others."
+   },
+   "Sara wanted to bake a cake for her mom.": {
+    "greedy": " She asked her mom if she could have a cake. Her mom said yes, but she had to be careful.\nSara was very happy. She took a big bowl and filled it with flour. She put some flour, sugar, eggs, and milk in the bowl. She mixed them all together. She mixed them all together and put them in the oven. She waited for the cake to bake.\nWhen the cake was ready, Sara took it out of the oven. She put it on the table and waited. She waited for the cake to bake. She waited and waited. She did not hear the sound of the cake. She did not hear the sound of the oven. She did not hear the sound of the oven. She did not hear the sound of the oven. She did",
+    "t0.8_seed0": " She took the cake to the market.\nShe got some paper and started to fold the paper. She folded it into a circle. She made a big square, a square, a square, and a square. She was very proud of her work. She showed it to her mom.\n\"Look, mom, look at my cake!\" Sara said.\n\"It is a popular cake, Sara. I am proud of you. It has a lot of value. You deserve it!\" her mom said.\n\"I see it, Sara. I have a different value. It is a modern cake. It has a big red button. It is a regular operation. It is not a normal cake. It is a regular cake. It has a number on it",
+    "t0.8_seed1": " She took a tray and some flour from the cupboard. She went to the kitchen and got some flour. She put them in the oven and watched the cake batter. She was very happy.\nBut then, Mom came home from work. She was stirring the flour and making the cake. She looked at Sara and smiled.\n\"Sara, you made cake with the oven, the oven is ready. But you need to stir something on the oven. It is hot and cold. And you need to make it hotter. It will make the cake burn. And you need to wipe it off the oven. Do you want to try something else?\"\nSara nodded. She was curious. She wanted to try the oven. She liked the cake. She wanted to taste it."
+   },
+   "The sun was hot, so Ben went to the lake.": {
+    "greedy": " He saw a big, red ball. He wanted to play with it. He ran to the ball and started to play.\nBen saw a big, red ball. He wanted to play with it. He ran to the ball and gave it a big push. The ball rolled away. Ben was sad. He wanted the ball back.\nThen, a nice bird came. The bird saw Ben and the red ball. The bird flew to the ball and gave it back to Ben. Ben was happy. He played with the red ball and the bird. They became friends.",
+    "t0.8_seed0": " He looked for some water to drink. He found some water under the water. He brought the water to the nice lady. The lady gave Ben some water to drink.\nThe lady gave Ben a big drink. Ben smiled. He drank the water. The lady said, \"This is good. Your drink is good. Thank you, Ben. You are a good helper. What is your name?\" Ben smiled. He said, \"This is my name is Ben. This is my drink. I am Lily. I like to play with it.\"\nThe lady said, \"This is Sara's drink. She is my friend. She was sleeping. She is a bear. Come and hug her and say, \"I will come. Come with me.\" She took Ben to her dog",
+    "t0.8_seed1": " He splashed water on the fish and had fun. The mild water made him feel better.\nSoon, the fish were swimming away from Ben. He was happy and excited. He enjoyed playing in the lake, and forgot about the sun. He was a happy and happy frog."
+   },
+   "Once upon a time": {
+    "greedy": ", there was a little girl named Lily. She loved to play with her toys and eat yummy food. One day, she found a big, red apple in her kitchen. She was so happy and wanted to eat it all by herself.\nLily's mom saw her looking at the apple and said, \"Lily, don't eat that apple. It's not good for you.\" But Lily did not listen. She took a bite of the apple and it was very yummy. She wanted to eat it all by herself.\nLily's mom saw her and said, \"Lily, you should not eat that apple. It's not good for you.\" Lily felt sad and said, \"I'm sorry, Mom. I will not eat it.\" Her mom smiled and said, \"It's okay",
+    "t0.8_seed0": ", there was a big, difficult jug. The jug had a soft drink. Every day, a little girl named Lily would wake up early. She would pour water from the jug to the table. Lily liked to think about how it felt when it was sunny outside.\nOne day, Lily found a jar of jelly. She was very happy. She thought the jelly was special. She wanted to share it with her friends. So, she went outside to fill the jar with some candy. But when she took a bite, she did not see it in the corner.\nThe whole day, Lily went back to her home. She saw her friends sleeping. They all looked at the jelly and thought it was very pretty. But then, they all laughed and decided to play a game. They",
+    "t0.8_seed1": ", there was a charming cat named Kitty. Kitty loved to play with her ball in the grass. One day, while Kitty was playing, her friend, Doggy, came to her house. Kitty wanted to play with Doggy's ball, but she didn't know how to play with the ball.\nKitty tried to teach Doggy how to play with the ball, but she remembered what her mom taught her. She asked Doggy, \"What should I do to teach you to do?\" Doggy said, \"You have to make turns with the ball.\"\nKitty thought for a moment and said, \"I have a great idea! Let's play together!\" So, Kitty and Doggy played with the ball and had lots of fun.\nAfter playing, Kitty and Doggy were very happy. They learned that sharing"
+   }
+  }
+ }
+}

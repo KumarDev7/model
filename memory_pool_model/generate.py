@@ -21,8 +21,13 @@ from .model import MemoryPoolLM
 
 
 class Generator:
-    def __init__(self, mcfg: ModelConfig, params, batch_size: int = 1):
+    def __init__(self, mcfg: ModelConfig, params, batch_size: int = 1,
+                 shuffle_pool: bool = False, pool_off: bool = False):
+        """shuffle_pool / pool_off: ablations for inspecting what the pool
+        contributes to the text (each read returns another slot's vector /
+        the pool is not read at all)."""
         self.mcfg, self.params, self.batch_size = mcfg, params, batch_size
+        self.shuffle_pool, self.pool_off = shuffle_pool, pool_off
         self.model = MemoryPoolLM(mcfg, decode=True)
         dummy = jnp.zeros((batch_size, mcfg.max_len), jnp.int32)
         self._empty_cache = jax.jit(lambda: self.model.init(jax.random.PRNGKey(0), dummy)["cache"])
@@ -30,7 +35,8 @@ class Generator:
 
     def _step_fn(self, params, cache, tokens, pos):
         (logits, aux), mut = self.model.apply(
-            {"params": params, "cache": cache}, tokens[:, None], positions=pos[None], mutable=["cache"])
+            {"params": params, "cache": cache}, tokens[:, None], positions=pos[None], mutable=["cache"],
+            shuffle_pool=self.shuffle_pool, pool_off=self.pool_off)
         return logits[:, 0], mut["cache"]
 
     def generate(self, prompt: np.ndarray, n_new: int, temperature: float = 0.0,

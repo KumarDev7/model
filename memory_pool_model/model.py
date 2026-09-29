@@ -80,6 +80,8 @@ class MemoryPoolLM(nn.Module):
                 max_temperature=cfg.max_temperature,
                 query_scale=cfg.router_query_scale,
                 host_pool=cfg.host_pool,
+                value_init_scale=cfg.value_init_scale,
+                balance_on_clean_picks=cfg.balance_on_clean_picks,
                 name="pool",
             )
 
@@ -142,4 +144,6 @@ def merge_layer_aux(layer_aux: List[Dict[str, Any]]) -> Dict[str, Any]:
         "temperature": layer_aux[0]["temperature"],
         # mean weight of the strongest of the top-k vectors (1/k = uniform mix)
         "top1_weight": jnp.mean(jnp.stack([a["top1_weight"] for a in layer_aux])),
+        # noisy training sub-key picks that the clean router also makes (1 = noise off)
+        "pick_agreement": jnp.mean(jnp.stack([a["pick_agreement"] for a in layer_aux])),
     }
