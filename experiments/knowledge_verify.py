@@ -370,6 +370,14 @@ def monitor(data, save_path, log_path, n_people=300, n_windows=64):
         items = fit.probe_items(tok, people, templates)
         for mode in MODES if mcfg.use_memory else ("normal",):
             row[f"recall_{wording}_{mode}"] = float(pr.run(items, mode=mode, batch=128)["hit"].mean())
+    nq = facts.get("qa_trained_people", 0)
+    if nq:  # Q/A: people trained with Q/A vs people only seen in bios
+        for which, grp in (("trained", facts["A"][:nq][:n_people]), ("heldout", facts["A"][nq:][:n_people])):
+            items = fit.probe_items(tok, grp, facts["qa_templates"])
+            for mode in MODES if mcfg.use_memory else ("normal",):
+                row[f"qa_{which}_{mode}"] = float(pr.run(items, mode=mode, batch=128)["hit"].mean())
+        items = fit.probe_items(tok, facts["B"][:n_people], facts["qa_templates"])
+        row["qa_never_seen"] = float(pr.run(items, batch=128)["hit"].mean())
     items_b = fit.probe_items(tok, facts["B"][:n_people // 2], facts["train_templates"])
     row["recall_never_seen"] = float(pr.run(items_b, batch=128)["hit"].mean())
     val = np.load(os.path.join(data, "val.npy"), mmap_mode="r")

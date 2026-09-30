@@ -100,6 +100,16 @@ DIV_T = {r: [f.replace("{p}", p) for p in _PHRASES[r] for f in _FRAMES]
 for _r in DIV_T:  # every wording must end with the answer
     DIV_T[_r] = [t for t in DIV_T[_r] if t.rstrip(".").endswith("{v}")]
 
+# Q/A training for half of the trained people (Allen-Zhu & Li, "Physics of
+# Language Models 3.1": mixed training). The other half is only ever seen in
+# bios; answering these questions for them is the knowledge-extraction test.
+QA_T = {
+    "born": ["Q: Where was {e} born? A: {v}."],
+    "job": ["Q: What is the job of {e}? A: {a} {v}."],
+    "study": ["Q: What did {e} study? A: {v}."],
+    "food": ["Q: What food does {e} like most? A: {v}."],
+}
+
 TEST_T = {
     "born": ["{e}'s hometown is {v}.", "{e} is originally from {v}."],
     "job": ["{e} has a career as {a} {v}.", "{e} is employed as {a} {v}."],
@@ -154,7 +164,8 @@ def shuffle_mix(rng, a, b, chunk=512):
     return np.concatenate([parts[i] for i in rng.permutation(len(parts))])
 
 
-def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000, augmented=False, fresh_offset=50_000_000):
+def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000, augmented=False, fresh_offset=50_000_000,
+          qa_mix=False):
     train_t = DIV_T if augmented == "diverse" else AUG_T if augmented else TRAIN_T
     from tokenizers import Tokenizer
 
@@ -165,6 +176,11 @@ def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000, augmented=F
     A, B = make_people(rng, n_a, taken), make_people(rng, n_b, taken)
     per_doc = len(encode_docs(tok, bios(rng, A, 500, train_t))) / 500
     a_docs = encode_docs(tok, bios(rng, A, int(fact_tokens / per_doc), train_t))
+    if qa_mix:  # Q/A documents for the first half of A only, ~20% of the fact tokens
+        half = A[: len(A) // 2]
+        qa = [" ".join(render(QA_T[r][0], p["name"], p[r]) for r in rng.permutation(RELS))
+              for p in (half[i % len(half)] for i in range(int(0.2 * len(a_docs) / 40)))]
+        a_docs = shuffle_mix(rng, a_docs, encode_docs(tok, qa))
     text = np.load(os.path.join(src, "train.npy"))
     np.save(os.path.join(out, "train.npy"), shuffle_mix(rng, text, a_docs))
     # set B: bios alone, and bios mixed with fresh text (not in train.npy)
@@ -187,7 +203,8 @@ def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000, augmented=F
                 fact_share=float(len(a_docs) / (len(text) + len(a_docs))), people_a=n_a, people_b=n_b,
                 bios_per_person_a=float(len(a_docs) / per_doc / n_a), augmented=augmented)
     json.dump(meta, open(os.path.join(out, "meta.json"), "w"), indent=1)
-    json.dump({"A": A, "B": B, "train_templates": train_t, "test_templates": TEST_T, "values": VALUES},
+    json.dump({"A": A, "B": B, "train_templates": train_t, "test_templates": TEST_T, "values": VALUES,
+               "qa_templates": QA_T, "qa_trained_people": len(A) // 2 if qa_mix else 0},
               open(os.path.join(out, "facts.json"), "w"))
     print(meta)
 
@@ -270,6 +287,7 @@ if __name__ == "__main__":
     ap.add_argument("--full", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--augmented", action="store_true", help="10 training wordings per relation instead of 4")
+    ap.add_argument("--qa_mix", action="store_true", help="Q/A documents for half of the trained people")
     ap.add_argument("--diverse", action="store_true", help="~60 generated wordings per relation (phrases x frames)")
     ap.add_argument("--people_a", type=int, default=2000)
     ap.add_argument("--fact_tokens", type=int, default=5_000_000)
@@ -277,4 +295,4 @@ if __name__ == "__main__":
                     help="where in --full the fresh text for set B starts (beyond the training text)")
     a = ap.parse_args()
     build(a.src, a.full, a.out, n_a=a.people_a, fact_tokens=a.fact_tokens, augmented="diverse" if a.diverse else a.augmented,
-          fresh_offset=a.fresh_offset)
+          fresh_offset=a.fresh_offset, qa_mix=a.qa_mix)
