@@ -362,3 +362,31 @@ layer, where the name has already been gathered).
   2-3 seeds and long training, and Q/A-format training for half of the
   people with Q/A tested on the other half (Allen-Zhu & Li's mixed
   training).
+
+### Q/A mixed training: the fix (2x T4, 6,000 steps)
+
+Same 2,000 people and bios (10 wordings), plus question-answer documents
+("Q: Where was X born? A: Lima.") for the **first 1,000 people only**. The
+other 1,000 appear only in bios. The test asks them the same questions:
+to answer, the model has to extract a fact it only read in a bio
+(Allen-Zhu & Li, mixed training). Results in `experiments/results/qa_mix_2xT4/`.
+
+| model (d512 x 6) | Q/A, people trained with Q/A | **Q/A, people seen only in bios** | Q/A, never-seen people (chance) | bio wordings | unseen statement wordings |
+|---|---|---|---|---|---|
+| dense | 98.8% | 84.8% | 3.1% | 81.1% | 12.0% |
+| **pool** | 99.5% | **92.5%** | 2.8% | 89.3% | 16.5% |
+| pool, reads shuffled / pool removed | 1.0% / 1.3% | **0.3% / 0.8%** | - | 0.5% / 1.3% | 0.3% / 0.3% |
+
+* **Knowledge extraction works.** Trained on questions for half the people,
+  the pool model answers them for the other half 92.5% of the time (dense of
+  the same size: 84.8%). With the pool's reads shuffled or the pool removed
+  this falls to 0.3-0.8%: the facts it extracts come from the pool, and the
+  backbone has learnt a general "read the fact for this person" skill.
+* The pool model is also better on the bios themselves (89.3% vs 81.1%) and
+  on held-out web text (loss 4.33 vs 4.37).
+* Statement wordings never trained in any form ("X's hometown is ...") stay
+  low (16.5%). The model generalises to the *format it was taught to answer
+  in* (questions), for people it never saw in that format; to cover other
+  formats they need to be in the Q/A-style training for some people too.
+* One seed, 6,000 steps, 2,000 people; the 80,000-fact scale and more seeds
+  are the next check.
