@@ -388,5 +388,22 @@ to answer, the model has to extract a fact it only read in a bio
   low (16.5%). The model generalises to the *format it was taught to answer
   in* (questions), for people it never saw in that format; to cover other
   formats they need to be in the Q/A-style training for some people too.
-* One seed, 6,000 steps, 2,000 people; the 80,000-fact scale and more seeds
-  are the next check.
+* **Second seed confirms it:** pool 90.9% on bio-only people (seed 0: 92.5%),
+  1.0% with the pool shuffled and 3.3% with it removed; dense 84.0% (seed 0:
+  84.8%). Chance 2.4-3.4%. Still 6,000 steps and 2,000 people; the 80,000-fact
+  scale is the next check.
+
+### Mixed precision (GPU)
+
+On a T4 the float32 step is bound by the backbone's matmuls (T4 has no fast
+float32 path), not by the pool: d512 x 6 dense 425 ms, with the pool 517 ms.
+New option `compute_dtype` runs the backbone's matmuls in float16 or
+bfloat16; parameters, the residual stream, layer norms, routing and the pool
+stay float32, and float16 trains with dynamic loss scaling (overflowing steps
+are skipped). One T4:
+
+| d512 x 6 | float32 | float16 |
+|---|---|---|
+| dense | 425 ms | 121 ms (3.5x) |
+| pool, 8 reads per head | 517 ms | 226 ms (2.3x) |
+

@@ -54,14 +54,18 @@ class MemoryPoolLM(nn.Module):
         """
         cfg = self.cfg
         B, T = tokens.shape
-        embed = nn.Embed(cfg.vocab_size, cfg.d_model, name="embed")
+        # Mixed precision: matmuls run in cfg.compute_dtype, parameters, the
+        # residual stream, layer norms, routing and the pool stay float32.
+        cdt = jnp.dtype(cfg.compute_dtype)
+        f32 = jnp.float32
+        embed = nn.Embed(cfg.vocab_size, cfg.d_model, name="embed", dtype=cdt)
         pos = self.param(
             "pos_embed", nn.initializers.normal(0.02), (cfg.max_len, cfg.d_model)
         )
         if positions is None:
-            x = embed(tokens) + pos[None, :T]
+            x = embed(tokens).astype(f32) + pos[None, :T]
         else:
-            x = embed(tokens) + pos[positions][None]
+            x = embed(tokens).astype(f32) + pos[positions][None]
         # in decode mode the attention cache applies the causal mask itself
         causal = None if self.decode else nn.make_causal_mask(tokens)
 
@@ -93,22 +97,24 @@ class MemoryPoolLM(nn.Module):
                 dropout_rate=cfg.dropout,
                 deterministic=not train,
                 decode=self.decode,
+                dtype=cdt,
                 name=f"attn_{i}",
             )(h, h, mask=causal)
-            x = x + h
+            x = x + h.astype(f32)
 
             h = nn.LayerNorm(name=f"ln_ffn_{i}")(x)
             is_mem_layer = pool is not None and i in cfg.memory_layers
             y = jnp.zeros_like(x)
             if not is_mem_layer or cfg.memory_ffn:
-                y = nn.Dense(cfg.d_model * cfg.ffn_mult, name=f"ffn_in_{i}")(h)
-                y = nn.Dense(cfg.d_model, name=f"ffn_out_{i}")(nn.gelu(y))
+                y = nn.Dense(cfg.d_model * cfg.ffn_mult, name=f"ffn_in_{i}", dtype=cdt)(h)
+                y = nn.Dense(cfg.d_model, name=f"ffn_out_{i}", dtype=cdt)(nn.gelu(y)).astype(f32)
 
             if is_mem_layer:
                 if route_through_pool:
                     x, y = jax.lax.stop_gradient(x), jax.lax.stop_gradient(y)
                 if not pool_off:
                     # Router: hidden state -> one query per pool head.
+                    # routing stays float32: top-k picks must not depend on rounding
                     q = nn.Dense(cfg.pool_heads * cfg.d_key, name=f"router_{i}")(h)
                     q = q.reshape(B, T, cfg.pool_heads, cfg.d_key)
                     mem, aux = pool(q, train=train, sparse_grad=sparse_grad, noise_scale=noise_scale,
@@ -117,15 +123,15 @@ class MemoryPoolLM(nn.Module):
                         mem = mem + probes[i]
                     # the gate must not be a path around the pool either
                     h_gate = jax.lax.stop_gradient(h) if route_through_pool else h
-                    gate = nn.silu(nn.Dense(cfg.d_value, name=f"mem_gate_{i}")(h_gate))
-                    y = y + nn.Dense(cfg.d_model, name=f"mem_out_{i}")(mem * gate)
+                    gate = nn.silu(nn.Dense(cfg.d_value, name=f"mem_gate_{i}", dtype=cdt)(h_gate))
+                    y = y + nn.Dense(cfg.d_model, name=f"mem_out_{i}", dtype=cdt)(mem * gate).astype(f32)
                     layer_aux.append(aux)
 
             y = nn.Dropout(cfg.dropout, deterministic=not train)(y)
             x = x + y
 
         x = nn.LayerNorm(name="ln_final")(x)
-        logits = embed.attend(x)
+        logits = embed.attend(x.astype(cdt)).astype(f32)
         return logits, merge_layer_aux(layer_aux)
 
 

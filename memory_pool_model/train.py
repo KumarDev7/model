@@ -41,6 +41,9 @@ class TrainState:
     slot_usage: jax.Array  # [N] EMA of slot selection frequency
     pool_m: jax.Array  # [N, D] lazy-Adam first moment of pool values ((0,) if dense)
     pool_v: jax.Array  # [N, D] lazy-Adam second moment
+    # float16 compute only: dynamic loss scale and steps since it last changed
+    loss_scale: jax.Array
+    good_steps: jax.Array
 
 
 def phase_at(tcfg: TrainConfig, step: int) -> Dict[str, bool]:
@@ -241,6 +244,7 @@ class Trainer:
         self.mcfg, self.tcfg = mcfg, tcfg
         self.model = MemoryPoolLM(mcfg)
         self.sparse = mcfg.use_memory and tcfg.sparse_pool_updates
+        self.fp16 = jnp.dtype(mcfg.compute_dtype) == jnp.float16
         if tcfg.pool_row_grads not in ("auto", "dense", "unique"):
             raise ValueError(f"unknown pool_row_grads {tcfg.pool_row_grads!r}")
         # under data parallelism the dense table is scatter-added on each
@@ -326,6 +330,8 @@ class Trainer:
             slot_usage=jnp.full((m.pool_size,), 1.0 / m.pool_size, jnp.float32),
             pool_m=pool_m,
             pool_v=pool_v,
+            loss_scale=jnp.asarray(2.0**15 if self.fp16 else 1.0, jnp.float32),
+            good_steps=jnp.zeros((), jnp.int32),
         )
 
     # ------------------------------------------------------------------ loss
@@ -410,11 +416,21 @@ class Trainer:
             probes = {i: jnp.zeros((B, T, self.mcfg.d_value)) for i in layers}
 
             def loss_fn(rest, probes):
-                return self._loss(merge_values(rest, values), batch, r_loss, True, route, nopool,
-                                  probes=probes, noise_scale=noise)
+                loss, extra = self._loss(merge_values(rest, values), batch, r_loss, True, route, nopool,
+                                         probes=probes, noise_scale=noise)
+                return loss * state.loss_scale, extra
 
             (_, (metrics, aux)), (g_rest, g_probe) = jax.value_and_grad(
                 loss_fn, argnums=(0, 1), has_aux=True)(rest, probes)
+            if self.fp16:
+                inv = 1.0 / state.loss_scale
+                g_rest = jax.tree_util.tree_map(lambda g: g * inv, g_rest)
+                g_probe = jax.tree_util.tree_map(lambda g: g * inv, g_probe)
+                finite = jnp.all(jnp.stack([jnp.all(jnp.isfinite(g)) for g in
+                                            jax.tree_util.tree_leaves((g_rest, g_probe))]))
+                # a non-finite step is skipped (below); zero grads keep the math finite
+                g_rest = jax.tree_util.tree_map(lambda g: jnp.where(finite, g, 0.0), g_rest)
+                g_probe = jax.tree_util.tree_map(lambda g: jnp.where(finite, g, 0.0), g_probe)
             dense_rows = self.dense_row_grads
             if dense_rows:
                 # g_rows: [N, D], zero outside the fetched rows `touched`
@@ -479,9 +495,15 @@ class Trainer:
             metrics["grad_norm"] = gnorm
             metrics["rows_updated"] = jnp.sum(touched) if dense_rows else jnp.sum(uniq < self.mcfg.pool_size)
         else:
-            grad_fn = jax.value_and_grad(self._loss, has_aux=True)
-            (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool,
-                                                 noise_scale=noise)
+            def scaled_loss(params):
+                loss, extra = self._loss(params, batch, r_loss, True, route, nopool, noise_scale=noise)
+                return loss * state.loss_scale, extra
+
+            (_, (metrics, aux)), grads = jax.value_and_grad(scaled_loss, has_aux=True)(state.params)
+            if self.fp16:
+                grads = jax.tree_util.tree_map(lambda g: g / state.loss_scale, grads)
+                finite = jnp.all(jnp.stack([jnp.all(jnp.isfinite(g)) for g in jax.tree_util.tree_leaves(grads)]))
+                grads = jax.tree_util.tree_map(lambda g: jnp.where(finite, g, 0.0), grads)
             updates, opt_state = self.optimizer.update(grads, state.opt_state, state.params)
             if t.pool_values_only:
                 updates = jax.tree_util.tree_map_with_path(
@@ -534,6 +556,20 @@ class Trainer:
                 subkey_spread=usage_stats(subkey_usage)["spread"].mean(),
             )
 
+        loss_scale, good_steps = state.loss_scale, state.good_steps
+        if self.fp16:
+            # skip the update on overflow and halve the scale; double it after
+            # 2,000 clean steps
+            keep = lambda new, old: jax.tree_util.tree_map(lambda a, b: jnp.where(finite, a, b), new, old)
+            params, opt_state = keep(params, state.params), keep(opt_state, state.opt_state)
+            pool_m, pool_v = keep(pool_m, state.pool_m), keep(pool_v, state.pool_v)
+            grow = finite & (good_steps + 1 >= 2000)
+            loss_scale = jnp.where(finite, jnp.where(grow, loss_scale * 2.0, loss_scale),
+                                   jnp.maximum(loss_scale * 0.5, 1.0))
+            good_steps = jnp.where(finite & ~grow, good_steps + 1, 0)
+            metrics["loss_scale"] = loss_scale
+            metrics["skipped_step"] = (~finite).astype(jnp.float32)
+
         new_state = state.replace(
             step=state.step + 1,
             params=params,
@@ -542,6 +578,8 @@ class Trainer:
             slot_usage=slot_usage,
             pool_m=pool_m,
             pool_v=pool_v,
+            loss_scale=loss_scale,
+            good_steps=good_steps,
         )
         return new_state, metrics, queries
 

@@ -72,6 +72,12 @@ class ModelConfig:
     # small routing noise nearly the same; pick_agreement is then NaN.
     balance_on_clean_picks: bool = True
 
+    # Dtype of the backbone's matmuls ("float32", "bfloat16", "float16").
+    # Parameters, residual stream, layer norms, routing and the pool stay
+    # float32. float16 (for GPUs without bf16, e.g. T4) trains with dynamic
+    # loss scaling. T4, d512 x 6 dense: the float32 step is bound by matmuls.
+    compute_dtype: str = "float32"
+
     @property
     def pool_size(self) -> int:
         return self.n_sub_keys**2

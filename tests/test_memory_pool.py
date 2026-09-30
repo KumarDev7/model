@@ -745,3 +745,45 @@ def test_pick_agreement_tracks_routing_noise():
     a_loud = float(loud.apply(params, q, train=True, rngs=rngs)[1]["pick_agreement"])
     a_quiet = float(quiet.apply(params, q, train=True, rngs=rngs)[1]["pick_agreement"])
     assert a_loud < a_quiet <= 1.0
+
+
+# ---- mixed precision ----
+@pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
+def test_mixed_precision_trains_and_matches_float32(dtype):
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    base = dict(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4)
+    tcfg = TrainConfig(batch_size=16, warmup_steps=5)
+    t32 = Trainer(ModelConfig(**base), tcfg)
+    tmp = Trainer(ModelConfig(**base, compute_dtype=dtype), tcfg)
+    s32, smp = t32.init(jax.random.PRNGKey(0)), tmp.init(jax.random.PRNGKey(0))
+    # same parameters (all float32); the forward pass agrees up to rounding
+    batch = ds.sample(np.random.default_rng(0), 16)
+    l32 = t32.model.apply({"params": s32.params}, batch["inputs"])[0]
+    lmp = tmp.model.apply({"params": smp.params}, batch["inputs"])[0]
+    assert lmp.dtype == jnp.float32
+    np.testing.assert_allclose(lmp, l32, atol=0.1)
+    rng = np.random.default_rng(1)
+    losses = []
+    for i in range(40):
+        smp, m, _ = tmp.train_step(smp, ds.sample(rng, 16), jax.random.PRNGKey(i))
+        losses.append(float(m["ce"]))
+    assert np.isfinite(losses).all() and losses[-1] < losses[0]
+    assert all(x.dtype == jnp.float32 for x in jax.tree_util.tree_leaves(smp.params))
+
+
+def test_fp16_loss_scaling_skips_overflow():
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4, compute_dtype="float16")
+    tr = Trainer(mcfg, TrainConfig(batch_size=16, warmup_steps=1))
+    s = tr.init(jax.random.PRNGKey(0))
+    assert float(s.loss_scale) == 2.0**15
+    s = s.replace(loss_scale=jnp.asarray(1e38, jnp.float32))  # guaranteed overflow
+    s1, m, _ = tr.train_step(s, ds.sample(np.random.default_rng(0), 16), jax.random.PRNGKey(0))
+    assert float(m["skipped_step"]) == 1.0 and np.isclose(float(s1.loss_scale), 5e37, rtol=1e-6)
+    for a, b in zip(jax.tree_util.tree_leaves(s.params), jax.tree_util.tree_leaves(s1.params)):
+        np.testing.assert_array_equal(a, b)  # nothing was updated
+    s2, m, _ = tr.train_step(s1.replace(loss_scale=jnp.asarray(1024.0, jnp.float32)),
+                             ds.sample(np.random.default_rng(1), 16), jax.random.PRNGKey(1))
+    assert float(m["skipped_step"]) == 0.0 and np.isfinite(float(m["loss"]))
