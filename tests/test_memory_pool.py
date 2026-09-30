@@ -537,6 +537,29 @@ def test_data_parallel_matches_single_device(row_grads):
     assert r.returncode == 0 and "OK" in r.stdout, r.stdout + r.stderr
 
 
+@pytest.mark.skipif(jax.default_backend() != "tpu" or jax.device_count() < 2, reason="needs 2+ TPU chips")
+@pytest.mark.parametrize("sharded", [False, True])
+def test_data_parallel_tpu_pallas(sharded):
+    """Data parallel on real TPU chips, where the router's top-k is the Pallas
+    kernel (XLA cannot partition it: it runs per device under shard_map)."""
+    from jax.sharding import Mesh
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                       n_sub_keys=128, pool_heads=2, d_key=16, d_value=32, top_k=4, routing_noise=0.0)
+    n = jax.device_count()
+    out = []
+    for mesh in (None, Mesh(np.array(jax.devices()), ("data",))):
+        tcfg = TrainConfig(steps=10, batch_size=8 * n, warmup_steps=2, pool_sharding=sharded and mesh is not None,
+                           pool_shard_capacity=float(n))
+        tr = Trainer(mcfg, tcfg, mesh=mesh)
+        st = tr.place_state(tr.init(jax.random.PRNGKey(0)))
+        rng = np.random.default_rng(0)
+        for i in range(3):
+            st, m, _ = tr.train_step(st, tr.place_batch(ds.sample(rng, 8 * n)), jax.random.PRNGKey(i))
+        out.append(float(m["loss"]))
+    assert np.isfinite(out[1]) and abs(out[0] - out[1]) < 2e-3 * abs(out[0]), out
+
+
 # ---- pool off the accelerator (host RAM / SSD) ----
 def _host_pair(tmp_path=None, pool_optimizer="adam"):
     ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)

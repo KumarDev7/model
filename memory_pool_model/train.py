@@ -130,7 +130,8 @@ def make_optimizer(tcfg: TrainConfig, clip: bool = True) -> optax.GradientTransf
 
     parts = [optax.clip_by_global_norm(tcfg.grad_clip)] if clip else []
     parts += [
-        optax.adamw(make_schedule(tcfg), weight_decay=tcfg.weight_decay, mask=decay_mask),
+        optax.adamw(make_schedule(tcfg), b1=ADAM_B1, b2=tcfg.adam_b2, eps=ADAM_EPS, weight_decay=tcfg.weight_decay,
+                    mask=decay_mask),
         scale_pool_values(tcfg.pool_lr_mult),
     ]
     return optax.chain(*parts)
@@ -251,6 +252,10 @@ class Trainer:
             if mcfg.pool_size % n_dev:
                 raise ValueError(f"pool size {mcfg.pool_size} is not divisible by {n_dev} devices")
             mcfg = dataclasses.replace(mcfg, pool_mesh=sharded_pool.register(mesh, tcfg.pool_shard_capacity))
+        if mesh is not None and mcfg.use_memory:
+            from . import sharded_pool
+
+            mcfg = dataclasses.replace(mcfg, dp_mesh=sharded_pool.register(mesh, 0.0))
         self.mcfg, self.tcfg = mcfg, tcfg
         self.model = MemoryPoolLM(mcfg)
         self.sparse = mcfg.use_memory and tcfg.sparse_pool_updates

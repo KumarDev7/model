@@ -34,6 +34,9 @@ class ModelConfig:
     # Filled in by the Trainer: registry name of the mesh of a row-sharded
     # pool (TrainConfig.pool_sharding).
     pool_mesh: str = ""
+    # Filled in by the Trainer under data parallelism: registry name of the
+    # mesh, so Pallas kernels (which XLA cannot partition) run per device.
+    dp_mesh: str = ""
     # Product-key pool: the pool has n_sub_keys**2 trainable value slots.
     n_sub_keys: int = 64
     # Independent router heads; each head fetches `top_k` slots.
@@ -100,6 +103,11 @@ class TrainConfig:
     # Turning it off did not change pool use on Ultra-FineWeb.
     decay_pool_path: bool = True
     grad_clip: float = 1.0
+    # Adam beta2 for the dense parameters (the pool's lazy Adam keeps
+    # 0.999). 0.95 is the usual choice for long language-model runs: with
+    # 0.999 one of three d512 x 6 pool runs (bfloat16, 120k steps) had its
+    # gradient norm grow from 0.3 to 1e4 after 90k steps and lost 0.34 nats.
+    adam_b2: float = 0.999
     # Pool values are updated sparsely (only fetched rows get gradient), so
     # they get a larger learning rate than the backbone.
     pool_lr_mult: float = 3.0

@@ -102,22 +102,34 @@ def _fused_router_ok() -> bool:
     return ok
 
 
-def _top_k(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
+def _top_k(x: jax.Array, k: int, mesh: str = "") -> Tuple[jax.Array, jax.Array]:
     """Top-k over the last axis, always on a 2-D view (lax.top_k on N-D
     inputs was 7x slower on TPU). TPU: a Pallas kernel (topk_pallas.py) when
     the width is lane-aligned; XLA's top_k is a full sort there (v5e, 65k
     rows x 512, k=16: 1.2 ms vs 7.5 ms, and 23.5 ms with argmax rounds).
     GPU: repeated argmax, where XLA's top_k is slow for small k. CPU:
     lax.top_k. Values carry no gradient here; read differentiable values
-    with take_last."""
+    with take_last. `mesh`: a registered data-parallel mesh whose data axis
+    shards the rows; XLA cannot partition a Pallas call, so it then runs per
+    device under shard_map."""
     flat = jax.lax.stop_gradient(x.reshape(-1, x.shape[-1]))
     backend = jax.default_backend()
     if backend == "tpu" and _pallas_top_k_ok():
         from . import topk_pallas
 
         if topk_pallas.supported(flat.shape[-1], k):
-            v, i = topk_pallas.top_k(flat, k)
-            return v.reshape(*x.shape[:-1], k), i.reshape(*x.shape[:-1], k)
+            if mesh:
+                from . import sharded_pool
+
+                m = sharded_pool.get(mesh)[0]
+                if flat.shape[0] % m.shape[sharded_pool.AXIS] == 0:
+                    spec = jax.sharding.PartitionSpec(sharded_pool.AXIS, None)
+                    f = sharded_pool._shard_map(lambda y: topk_pallas.top_k(y, k), m, (spec,), (spec, spec))
+                    v, i = f(flat)
+                    return v.reshape(*x.shape[:-1], k), i.reshape(*x.shape[:-1], k)
+            else:
+                v, i = topk_pallas.top_k(flat, k)
+                return v.reshape(*x.shape[:-1], k), i.reshape(*x.shape[:-1], k)
     if backend == "gpu" and k <= 32:
         v, i = _top_k_by_max(flat, k)
     else:
@@ -207,6 +219,9 @@ class MemoryPool(nn.Module):
     # Name of a registered sharded_pool mesh: the value table is sharded by
     # rows over its data axis and training reads go through an all-to-all.
     pool_mesh: str = ""
+    # Name of a registered data-parallel mesh (rows of the routing tensors are
+    # sharded over its data axis): Pallas kernels then run under shard_map.
+    dp_mesh: str = ""
 
     def setup(self):
         assert self.d_key % 2 == 0, "d_key must be even (split into two halves)"
@@ -271,7 +286,8 @@ class MemoryPool(nn.Module):
         G = 2 * H
         noisy = train and self.routing_noise > 0
         fused = None
-        if (not self.query_scale and not self.balance_temperature_grad and _fused_router_ok()):
+        if (not self.query_scale and not self.balance_temperature_grad and not self.dp_mesh
+                and _fused_router_ok()):
             from . import router_pallas
 
             if router_pallas.supported(n, k, M):
@@ -300,7 +316,7 @@ class MemoryPool(nn.Module):
                 select_scores = scores
 
             # Stage 1: top-k sub-keys for each half.
-            sel_vals_g, sub_idx_g = _top_k(select_scores, k)  # [M, G, k]
+            sel_vals_g, sub_idx_g = _top_k(select_scores, k, self.dp_mesh)  # [M, G, k]
             sub_scores_g = take_last(scores, sub_idx_g)  # differentiable
         sub_idx = sub_idx_g.reshape(M, H, 2, k)
         sub_scores = sub_scores_g.reshape(M, H, 2, k)
@@ -311,7 +327,7 @@ class MemoryPool(nn.Module):
         cand_select = sub_select[..., 0, :, None] + sub_select[..., 1, None, :]
         cand = cand.reshape(*cand.shape[:-2], k * k)  # [M, H, k*k]
         cand_select = cand_select.reshape(cand.shape)
-        _, flat_idx = _top_k(cand_select, k)  # [M, H, k]
+        _, flat_idx = _top_k(cand_select, k, self.dp_mesh)  # [M, H, k]
         slot_scores = take_last(cand, flat_idx)
         idx_a = take_last(sub_idx[..., 0, :], flat_idx // k)
         idx_b = take_last(sub_idx[..., 1, :], flat_idx % k)
@@ -383,7 +399,7 @@ class MemoryPool(nn.Module):
             if clean:
                 member = select_scores >= sel_vals_g[..., -1:]  # [M, G, n]
             else:
-                clean_vals = _top_k(scores, k)[0]  # [M, G, k]
+                clean_vals = _top_k(scores, k, self.dp_mesh)[0]  # [M, G, k]
                 member = scores >= clean_vals[..., -1:]
             # exact up to ties at the k-th score (a zero-probability event for
             # float scores), in which case a tied sub-key is counted too

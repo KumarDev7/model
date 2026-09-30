@@ -87,6 +87,7 @@ class MemoryPoolLM(nn.Module):
                 value_init_scale=cfg.value_init_scale,
                 balance_on_clean_picks=cfg.balance_on_clean_picks,
                 pool_mesh=cfg.pool_mesh,
+                dp_mesh=cfg.dp_mesh,
                 name="pool",
             )
 

@@ -2,7 +2,8 @@
 
   * trains a byte-level BPE tokenizer (default 16,384 tokens) on documents
     from the training file,
-  * train.npy: documents from ultrafineweb-en part 1 until --train_tokens,
+  * train.npy: documents from ultrafineweb-en part 1 (or the files given by
+    --train_parts, encoded in parallel processes) until --train_tokens,
   * val.npy: held-out documents from a different file (part 2),
   * ood.npy: Tiny Shakespeare (a different domain),
   * train_counts.npy: how often each token id occurs in train.npy.
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
 import sys
 import urllib.request
@@ -74,6 +76,13 @@ def encode(tok: Tokenizer, texts, limit: int, chunk: int = 2048) -> np.ndarray:
     return np.concatenate(out)[:limit]
 
 
+def _encode_part(args):
+    tok_path, part, limit = args
+    arr = encode(Tokenizer.from_file(tok_path), docs(part), limit)
+    print(f"part {part}: {len(arr) / 1e6:.1f}M tokens", flush=True)
+    return arr
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
@@ -81,7 +90,12 @@ def main():
     ap.add_argument("--tokenizer_docs", type=int, default=100_000)
     ap.add_argument("--train_tokens", type=int, default=100_000_000)
     ap.add_argument("--val_tokens", type=int, default=2_000_000)
+    ap.add_argument("--train_parts", default="1",
+                    help="comma-separated Ultra-FineWeb files for train.npy (part 2 is the held-out split)")
     a = ap.parse_args()
+    parts = [int(p) for p in a.train_parts.split(",")]
+    if 2 in parts:
+        raise ValueError("part 2 is the held-out split")
     os.makedirs(a.out, exist_ok=True)
 
     tok_path = os.path.join(a.out, "tokenizer.json")
@@ -93,8 +107,13 @@ def main():
         tok = train_tokenizer((next(it) for _ in range(a.tokenizer_docs)), a.vocab)
         tok.save(tok_path)
 
-    print("train split (part 1)", flush=True)
-    train = encode(tok, docs(1), a.train_tokens)
+    print(f"train split (parts {parts})", flush=True)
+    if len(parts) == 1:
+        train = encode(tok, docs(parts[0]), a.train_tokens)
+    else:  # one process per file; each file is encoded up to the whole budget, then trimmed
+        with mp.get_context("spawn").Pool(len(parts)) as pool:
+            train = np.concatenate(pool.map(_encode_part, [(tok_path, p, a.train_tokens) for p in parts]))
+        train = train[:a.train_tokens]
     np.save(os.path.join(a.out, "train.npy"), train)
     np.save(os.path.join(a.out, "train_counts.npy"), np.bincount(train, minlength=tok.get_vocab_size()))
     print("held-out split (part 2)", flush=True)
@@ -106,7 +125,7 @@ def main():
     np.save(os.path.join(a.out, "ood.npy"), ood)
 
     meta = {"vocab_size": tok.get_vocab_size(), "train_tokens": int(len(train)), "val_tokens": int(len(val)),
-            "ood_tokens": int(len(ood)), "train_source": PART.format(1), "val_source": PART.format(2),
+            "ood_tokens": int(len(ood)), "train_source": [PART.format(p) for p in parts], "val_source": PART.format(2),
             "ood_source": SHAKESPEARE,
             "bytes_per_token_ood": len(text.encode()) / len(ood)}
     json.dump(meta, open(os.path.join(a.out, "meta.json"), "w"), indent=1)
