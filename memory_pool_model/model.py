@@ -100,6 +100,7 @@ class MemoryPoolLM(nn.Module):
                 deterministic=not train,
                 decode=self.decode,
                 dtype=cdt,
+                force_fp32_for_softmax=cfg.attn_fp32_softmax,
                 name=f"attn_{i}",
             )(h, h, mask=causal)
             x = x + h.astype(f32)

@@ -83,6 +83,10 @@ class ModelConfig:
     # float32. float16 (for GPUs without bf16, e.g. T4) trains with dynamic
     # loss scaling. T4, d512 x 6 dense: the float32 step is bound by matmuls.
     compute_dtype: str = "float32"
+    # Attention softmax in float32 when compute_dtype is 16-bit (Flax's
+    # force_fp32_for_softmax). Two long bfloat16 pool runs had their gradient
+    # norm blow up in the first layers late in training.
+    attn_fp32_softmax: bool = True
 
     @property
     def pool_size(self) -> int:
