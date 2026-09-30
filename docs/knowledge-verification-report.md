@@ -318,6 +318,8 @@ is the next thing to try.
 | 8 | `facts_in_text.build` took set B's fresh text from a fixed offset (50M) of the full file | with a larger training set the "fresh" text would have been training text | `--fresh_offset` with an overlap check |
 | 9 | `text_study.launch` could only pin CUDA GPUs | no way to run one arm per TPU chip | `--gpus tpu0,...,tpu7` pins each process to one chip (own port) |
 | 10 | Colab's image ships libtpu 0.0.21.1 with jax 0.7.2 (needs 0.0.23) | Mosaic (Pallas) kernels fail to load | documented; the router probes the kernel once and falls back to `lax.top_k` with a warning |
+| 11 | the Pallas top-k was called directly under a data-parallel mesh | multi-chip TPU training crashed ("Mosaic kernels cannot be automatically partitioned"); only GPU data parallel had been tested | the trainer registers the mesh and the kernel runs per device under `shard_map`; 8-chip test |
+| 12 | backbone Adam with beta2 = 0.999 | one of three 120k-step bfloat16 pool runs blew up after 90k steps (gradient norm 0.3 -> 2.8e4, Q/A 97% -> 39%) | `TrainConfig.adam_b2` (0.95 for long runs); cause not yet confirmed |
 
 Not changed, needs a decision: `.github/workflows/run.yml` runs on every push,
 downloads an archive from an anonymous file host (`free.keep.sh`), builds it
@@ -473,3 +475,117 @@ exchange the gradients of all rows read (or the whole table). Before a large
 multi-device run the pool should be sharded by rows across devices (each
 device owns a slice, reads are sent to the owner, only owned rows are
 updated), which also lifts the one-device limit on pool size.
+
+
+## 20,000 people with Q/A mixed training (TPU v5e-8, bfloat16, 3 seeds)
+
+Date: 2026-09-30. Kaggle TPU v5e-8, JAX 0.11.2, one run per chip. Data: 380M
+tokens of Ultra-FineWeb + 84M tokens of bios and Q/A documents: 20,000
+people, 80,000 facts, bios in 10 wordings, Q/A documents ("Q: Where was X
+born? A: Lima.") for the first 10,000 people only. The test asks the same
+questions about the other 10,000, who appear only in bios. d512 x 6 backbone,
+120,000 steps x 8,192 tokens, `compute_dtype=bfloat16`. Results, logs and
+generations in `experiments/results/long_qa_v5e8/`.
+
+Teacher-forced probes, 300 people per group, final checkpoints:
+
+| model | Q/A, trained with Q/A | **Q/A, seen only in bios** | same, pool shuffled | bio recall | never seen (chance) | held-out loss (shuffled) | ms / step |
+|---|---|---|---|---|---|---|---|
+| dense_4x (same backbone, 3 seeds) | 98.3-99.1% | 91.2-93.8% | - | 85.6-87.1% | 3.3-3.6% | 3.544-3.548 | 13.5 |
+| **pool_4x**, seeds 0 and 2 | 99.9-100% | **99.3%** | **0.0%** | 95.5-96.4% | 2.8-3.4% | 3.434-3.441 (4.46-4.49) | 50 |
+| pool_4x, seed 1 (unstable, see below) | 48.0% | 38.7% | 0.0% | 40.1% | 3.1% | 3.787 | 50 |
+| dense_8x (d768 x 8, 70M parameters, 3 seeds) | 99.8-99.9% | 98.8-99.3% | - | 95.3-96.1% | 2.5-3.3% | 3.359-3.363 | 30 |
+
+Q/A on people seen only in bios during training:
+
+| step | 20k | 30k | 40k | 50k | 60k | 80k | 120k |
+|---|---|---|---|---|---|---|---|
+| dense_4x | 4% | 4-5% | - | 14% | 26% | 74% | 91-94% |
+| dense_8x | 4-5% | 6% | 28-34% | - | 76-81% | - | 99% |
+| pool_4x | 4% | 5-6% | 26-30% | 64-71% | 82-87% | 96-97% | 99.3% |
+
+**Generated text, not only probe numbers** (`experiments/inspect_outputs.py`:
+greedy decoding, no teacher forcing, the answer cut at the first period and
+compared with the truth; 200 people per group, 800 questions):
+
+| model | Q/A, trained with Q/A | Q/A, seen only in bios | Q/A, never seen | bio, training wording |
+|---|---|---|---|---|
+| pool_4x (seed 0 / 2) | 100% / 100% | **99.4% / 99.5%** | 3.4% / 2.2% | 84.5% / 88.0% |
+| same, pool reads shuffled | 0% | **0%** | 0% | 0-0.2% |
+| dense_4x | 98.5% | 93.9% | 2.4% | 71.6% |
+| dense_8x (seed 1) | 99.6% | 99.4% | 2.2% | 88.6% |
+
+Examples from pool_4x (people seen only in bios):
+
+```
+Q: What is the job of Velosk Mirrofen? A:  ->  a veterinarian. Q: What food does V...   (truth: a veterinarian)
+Q: Where was Korcletor Yarul born? A:      ->  Denver. Q: What food does Kor...          (truth: Denver)
+same, pool reads shuffled:                 ->  a. The degree of the same way.            
+Q: Where was Brais Ulkor born? A: (never seen)  ->  Muscat. Q: What is the job of ...     (truth: Salzburg)
+```
+
+* The answers are real: the model writes the value and stops at the period,
+  then continues with the next question in the trained format. For people it
+  never saw it gives a valid-looking value of the right kind (96-98% of
+  answers), correct at chance (2-3%): it does not invent a format, and it
+  does not know what it was not taught.
+* With the pool reads shuffled the pool model answers nothing (0%) and
+  writes broken text: every recalled fact comes from the pool.
+* **Pool vs the same backbone without the pool:** 99.3% vs 91-94% on
+  extraction, 96% vs 86% on bios, loss 3.44 vs 3.55, and the pool model gets
+  there in fewer steps (60k steps: 82-87% vs 26%).
+* **Pool vs a bigger dense model (dense_8x):** same extraction (99.3% vs
+  98.8-99.3%) with 28.7M instead of 70M parameters on the accelerator
+  (the 67M-value pool can live in host RAM or on SSD, and int8 storage is
+  lossless: 99.2% at int8 and 99.0% at int4 vs 99.3% float32,
+  `inference_robustness_pool_4x.json`), but dense_8x has the better held-out
+  loss (3.36 vs 3.44) and a faster step (30 vs 50 ms). At equal compute the
+  pool buys a smaller on-chip model, not better language modelling.
+* Targeted deletion (200 facts): zeroing the 4-per-head vectors a fact reads
+  (0.08% of the pool) leaves 6.8-8.9% of it; as many random vectors leave
+  99.6-99.8%. Zeroing another person's vectors for the same relation also
+  hurts (17-26% left): 34-37% of the vectors are shared per relation, so this
+  control is not independent.
+* Write test at this scale (update only the pool's vectors, backbone
+  frozen): 1,000 new people learnt to 99.3%, old facts 86.6% (96.8% with
+  replay), held-out perplexity 32.1.
+* Statement wordings never trained in any form stay at 0-0.5%, as before:
+  the model generalises to the format it was taught to answer in.
+
+**Instability in one of three pool runs.** In seed 1 the gradient norm grew
+from 0.25 (60k) to 0.8 (90k), 45 (100k) and 2.8e4 (117k); clipping kept each
+update bounded but training degraded (held-out loss 3.51 -> 3.79, Q/A 97% ->
+39%). Routing stayed healthy throughout (92% of the pool read, all sub-keys
+used): this is an optimiser instability, not pool collapse. On the final
+checkpoint 99% of the embedding gradient sits in 20 token rows and at
+positions 0-3 of the windows (healthy seed: grad norm 0.37 vs 9.4 on the same
+held-out batch). The dense parameters used Adam with beta2 = 0.999 (optax
+default); long language-model runs normally use 0.95 for this reason, so
+`TrainConfig.adam_b2` was added and the large run below uses 0.95. Not yet
+verified to be the cause (one failure in three; no earlier checkpoint was
+kept to replay it).
+
+**Data parallel on TPU and the sharded pool.** Multi-chip training on TPU
+failed: XLA cannot partition a Pallas call (`Mosaic kernels cannot be
+automatically partitioned`), so the router's top-k now runs per device under
+`shard_map` (tested on 8 chips, replicated and sharded pool). d512 x 6,
+32 x 256 tokens per chip, bfloat16:
+
+| model | 1 chip | 2 chips | 4 chips | 8 chips | speed-up at 8 |
+|---|---|---|---|---|---|
+| dense | 620k tok/s | 1.08M | 2.21M | 4.31M | 6.95x |
+| pool, replicated | 165k tok/s | 237k | 508k | 960k | **5.83x** |
+| pool, sharded by rows (capacity 1.5) | - | 159k | 361k | 597k | 3.6x |
+
+On the TPU the replicated pool scales well (the table's gradient all-reduce
+is cheap on the chip interconnect), and the row-sharded pool is slower: its
+two all-to-alls per layer cost more than they save. Sharding stays on the
+`pool-sharding` branch for pools that do not fit on one chip.
+
+**Where the pool step's time goes** (bfloat16, one chip, 49.5 ms vs 13.2 ms
+dense; `jax.profiler`): gradient scatter-add 8.6 ms, row gathers 6.4 ms (each
+row is gathered once for forward and backward), masked Adam 3.0 ms, layout
+copies 3.5 ms, router ~6 ms, top-k 3.2 ms. A microbenchmark shows the
+gathers and scatters are bound by the number of rows touched (~14 ns per
+row; 18 GB/s of the chip's 819 GB/s), not by bytes: a bfloat16 table saves
+only 8% (3.69 -> 3.40 ms per gather). MFU: dense ~53%, pool ~15%.
