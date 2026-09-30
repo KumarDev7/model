@@ -77,6 +77,29 @@ AUG_T = {
                                "{e} could eat {v} every day.", "Nothing makes {e} happier than {v}.",
                                "{e} is a big fan of {v}.", "At lunch, {e} usually picks {v}."],
 }
+# "diverse" build: relation phrases x sentence frames (~60 wordings per
+# relation, possessive and question-answer forms included) so the model has
+# to tie the answer to the person, not to one sentence. The TEST_T wordings
+# ("hometown", "originally from", "career as", ...) are never generated.
+_PHRASES = {
+    "born": ["was born in {v}", "comes from {v}", "is a native of {v}", "hails from {v}", "was raised in {v}",
+             "grew up in {v}", "started life in {v}"],
+    "job": ["works as {a} {v}", "is {a} {v} by trade", "earns a living as {a} {v}", "makes money as {a} {v}",
+            "has the job of {a} {v}", "works full time as {a} {v}", "is known as {a} {v}"],
+    "study": ["studied {v}", "majored in {v}", "holds a degree in {v}", "graduated in {v}", "trained in {v}",
+              "did a degree in {v}", "focused on {v} at university"],
+    "food": ["loves to eat {v}", "likes {v} best", "always orders {v}", "never gets tired of {v}", "enjoys {v} most",
+             "prefers {v} over anything", "is a big fan of {v}"],
+}
+_NOUNS = {"born": ["birthplace", "place of birth", "birth city"], "job": ["job", "profession", "occupation"],
+          "study": ["degree", "subject", "major"], "food": ["favorite food", "favorite meal", "top food"]}
+_FRAMES = ["{e} {p}.", "It is known that {e} {p}.", "Friends say that {e} {p}.", "As far as we know, {e} {p}."]
+_NOUN_FRAMES = ["The {n} of {e} is {v}.", "{e}'s {n} is {v}.", "Q: What is the {n} of {e}? A: {v}."]
+DIV_T = {r: [f.replace("{p}", p) for p in _PHRASES[r] for f in _FRAMES]
+         + [f.replace("{n}", n) for n in _NOUNS[r] for f in _NOUN_FRAMES] for r in _PHRASES}
+for _r in DIV_T:  # every wording must end with the answer
+    DIV_T[_r] = [t for t in DIV_T[_r] if t.rstrip(".").endswith("{v}")]
+
 TEST_T = {
     "born": ["{e}'s hometown is {v}.", "{e} is originally from {v}."],
     "job": ["{e} has a career as {a} {v}.", "{e} is employed as {a} {v}."],
@@ -132,7 +155,7 @@ def shuffle_mix(rng, a, b, chunk=512):
 
 
 def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000, augmented=False, fresh_offset=50_000_000):
-    train_t = AUG_T if augmented else TRAIN_T
+    train_t = DIV_T if augmented == "diverse" else AUG_T if augmented else TRAIN_T
     from tokenizers import Tokenizer
 
     os.makedirs(out, exist_ok=True)
@@ -247,10 +270,11 @@ if __name__ == "__main__":
     ap.add_argument("--full", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--augmented", action="store_true", help="10 training wordings per relation instead of 4")
+    ap.add_argument("--diverse", action="store_true", help="~60 generated wordings per relation (phrases x frames)")
     ap.add_argument("--people_a", type=int, default=2000)
     ap.add_argument("--fact_tokens", type=int, default=5_000_000)
     ap.add_argument("--fresh_offset", type=int, default=50_000_000,
                     help="where in --full the fresh text for set B starts (beyond the training text)")
     a = ap.parse_args()
-    build(a.src, a.full, a.out, n_a=a.people_a, fact_tokens=a.fact_tokens, augmented=a.augmented,
+    build(a.src, a.full, a.out, n_a=a.people_a, fact_tokens=a.fact_tokens, augmented="diverse" if a.diverse else a.augmented,
           fresh_offset=a.fresh_offset)

@@ -63,6 +63,13 @@ ARMS = {
     "dense": ["--use_memory", "false"],
     "dense_2x": ["--use_memory", "false", "--d_model", "384"],
     "dense_4x": ["--use_memory", "false", "--d_model", "512", "--n_layers", "6"],
+    # pool read only in the last layer: the query comes from a state that has
+    # already gathered the name (routing on the person, less on the wording)
+    "pool_late": POOL[:1] + ["3"] + POOL[2:],
+    "pool_4x": ["--d_model", "512", "--n_layers", "6", "--memory_layers", "2,4", "--n_sub_keys", "512",
+                "--d_key", "128", "--d_value", "256", "--memory_ffn", "true"],
+    "pool_4x_late": ["--d_model", "512", "--n_layers", "6", "--memory_layers", "5", "--n_sub_keys", "512",
+                     "--d_key", "128", "--d_value", "256", "--memory_ffn", "true"],
     # second seeds (training order and init; same data)
     "pool_s1": POOL + ["--seed", "1"],
     "pool_noffn_s1": POOL[:-2] + ["--memory_ffn", "false", "--seed", "1"],
