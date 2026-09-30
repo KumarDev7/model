@@ -20,6 +20,10 @@ Anti-collapse mechanisms implemented here:
 
 from __future__ import annotations
 
+import concurrent.futures
+import functools
+import os
+import warnings
 from typing import Any, Dict, Tuple
 
 import jax
@@ -45,17 +49,90 @@ def _top_k_by_max(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
     return jnp.stack(vals, -1), jnp.stack(idx, -1)
 
 
+@functools.lru_cache(maxsize=None)
+def _pallas_top_k_ok() -> bool:
+    """Whether the Pallas top-k kernel compiles and runs here (TPU only; it
+    needs a libtpu that matches jaxlib). MEMPOOL_PALLAS=0 turns it off."""
+    if os.environ.get("MEMPOOL_PALLAS", "1") == "0" or jax.default_backend() != "tpu":
+        return False
+
+    def probe():
+        from . import topk_pallas
+
+        x = jnp.arange(8 * 128, dtype=jnp.float32).reshape(8, 128)
+        _, i = topk_pallas.top_k(x, 2)
+        return bool(jnp.all(i == jnp.array([127, 126])))
+
+    try:
+        # usually called while a step is being traced; JAX's trace state is
+        # per thread, so a fresh thread runs the probe eagerly
+        with concurrent.futures.ThreadPoolExecutor(1) as ex:
+            ok = ex.submit(probe).result()
+    except Exception as e:  # noqa: BLE001 - any compile/runtime failure means "don't use it"
+        warnings.warn(f"Pallas top-k unavailable, using lax.top_k: {type(e).__name__}: {str(e)[:200]}")
+        return False
+    if not ok:
+        warnings.warn("Pallas top-k gave a wrong result, using lax.top_k")
+    return ok
+
+
 def _top_k(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
-    """Top-k over the last axis. lax.top_k on a 2-D view on CPU (much faster
-    than N-D there); repeated argmax on GPU and TPU, where XLA's top_k is slow
-    for small k (TPU v5e, 131k rows x 512, k=4: 11.5 ms vs 37 ms 2-D and
-    256 ms N-D; this made a TinyStories step 27x slower than without the pool)."""
-    flat = x.reshape(-1, x.shape[-1])
-    if jax.default_backend() != "cpu" and k <= 32:
+    """Top-k over the last axis, always on a 2-D view (lax.top_k on N-D
+    inputs was 7x slower on TPU). TPU: a Pallas kernel (topk_pallas.py) when
+    the width is lane-aligned; XLA's top_k is a full sort there (v5e, 65k
+    rows x 512, k=16: 1.2 ms vs 7.5 ms, and 23.5 ms with argmax rounds).
+    GPU: repeated argmax, where XLA's top_k is slow for small k. CPU:
+    lax.top_k. Values carry no gradient here; read differentiable values
+    with take_last."""
+    flat = jax.lax.stop_gradient(x.reshape(-1, x.shape[-1]))
+    backend = jax.default_backend()
+    if backend == "tpu" and _pallas_top_k_ok():
+        from . import topk_pallas
+
+        if topk_pallas.supported(flat.shape[-1], k):
+            v, i = topk_pallas.top_k(flat, k)
+            return v.reshape(*x.shape[:-1], k), i.reshape(*x.shape[:-1], k)
+    if backend == "gpu" and k <= 32:
         v, i = _top_k_by_max(flat, k)
     else:
         v, i = jax.lax.top_k(flat, k)
     return v.reshape(*x.shape[:-1], k), i.reshape(*x.shape[:-1], k)
+
+
+def _onehot_take(x: jax.Array, idx: jax.Array) -> jax.Array:
+    return jnp.sum(jnp.where(idx[..., :, None] == jnp.arange(x.shape[-1]), x[..., None, :], 0), axis=-1)
+
+
+@functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
+def _onehot_take_diff(x: jax.Array, idx: jax.Array, width: int) -> jax.Array:
+    return _onehot_take(x, idx)
+
+
+def _onehot_take_fwd(x, idx, width):
+    return _onehot_take(x, idx), idx
+
+
+def _onehot_take_bwd(width, idx, g):
+    dx = jnp.sum(jnp.where(idx[..., :, None] == jnp.arange(width), g[..., :, None], 0), axis=-2)
+    return dx.astype(g.dtype), None
+
+
+_onehot_take_diff.defvjp(_onehot_take_fwd, _onehot_take_bwd)
+
+
+def take_last(x: jax.Array, idx: jax.Array) -> jax.Array:
+    """take_along_axis(x, idx, axis=-1) for a small number of indices per row.
+
+    On TPU a gather along a short minor axis and its scatter-add gradient
+    are very slow (v5e, x [8192, 4, 2, 512], 16 indices per row: 16.5 ms
+    forward, 10.8 ms backward); a one-hot compare-select-reduce, which XLA
+    fuses without materialising the one-hot, is 0.7 ms and 1.0 ms. Other
+    backends use the gather."""
+    if jax.default_backend() != "tpu":
+        return jnp.take_along_axis(x, idx, axis=-1)
+    if not jnp.issubdtype(x.dtype, jnp.floating):
+        return _onehot_take(x, idx)
+    return _onehot_take_diff(x, idx, x.shape[-1])
 
 
 def unit_sphere_init(key, shape, dtype=jnp.float32):
@@ -164,9 +241,9 @@ class MemoryPool(nn.Module):
             select_scores = scores
 
         # Stage 1: top-k sub-keys for each half.
-        _, sub_idx = _top_k(select_scores, k)  # [M, H, 2, k]
-        sub_scores = jnp.take_along_axis(scores, sub_idx, axis=-1)
-        sub_select = jnp.take_along_axis(select_scores, sub_idx, axis=-1)
+        sel_vals, sub_idx = _top_k(select_scores, k)  # [M, H, 2, k]
+        sub_scores = take_last(scores, sub_idx)  # differentiable
+        sub_select = sel_vals  # = select_scores at sub_idx (selection only)
 
         # Stage 2: exact top-k over the k*k cartesian candidates.
         cand = sub_scores[..., 0, :, None] + sub_scores[..., 1, None, :]
@@ -174,9 +251,9 @@ class MemoryPool(nn.Module):
         cand = cand.reshape(*cand.shape[:-2], k * k)  # [M, H, k*k]
         cand_select = cand_select.reshape(cand.shape)
         _, flat_idx = _top_k(cand_select, k)  # [M, H, k]
-        slot_scores = jnp.take_along_axis(cand, flat_idx, axis=-1)
-        idx_a = jnp.take_along_axis(sub_idx[..., 0, :], flat_idx // k, axis=-1)
-        idx_b = jnp.take_along_axis(sub_idx[..., 1, :], flat_idx % k, axis=-1)
+        slot_scores = take_last(cand, flat_idx)
+        idx_a = take_last(sub_idx[..., 0, :], flat_idx // k)
+        idx_b = take_last(sub_idx[..., 1, :], flat_idx % k)
         slots = idx_a * n + idx_b  # [M, H, k]
 
         # Fetch and mix knowledge vectors; heads are summed.
@@ -198,23 +275,31 @@ class MemoryPool(nn.Module):
         out = out.reshape(*lead_shape, self.d_value)
 
         # ---- routing statistics / anti-collapse terms ----
+        # Scatters are slow on TPU (~7 ms per 1M updates on v5e), so there is
+        # one per layer: per-head slot counts, from which the sub-key counts
+        # and the pool-wide slot counts are sums. Top-k memberships are
+        # counted densely by comparing scores with the k-th largest.
         M = q.shape[0]
-        codebook = (jnp.arange(H)[:, None, None] * 2 + jnp.arange(2)[None, :, None]) * n
-
-        def count_subkeys(ids):  # ids: [M, H, 2, k] -> counts [H, 2, n]
-            flat = (ids + codebook).reshape(-1)
-            return jnp.zeros((H * 2 * n,), jnp.float32).at[flat].add(1.0).reshape(H, 2, n)
-
+        head_slots = (slots + jnp.arange(H)[None, :, None] * self.pool_size).reshape(-1)
+        head_counts = jnp.zeros((H * self.pool_size,), jnp.float32).at[head_slots].add(1.0).reshape(H, n, n)
         # Sub-keys actually used by the final selection (for usage tracking).
-        subkey_counts = count_subkeys(jnp.stack([idx_a, idx_b], axis=2))
+        subkey_counts = jnp.stack([head_counts.sum(2), head_counts.sum(1)], axis=1)  # [H, 2, n]
+        slot_counts = head_counts.sum(0).reshape(-1)
+
         # Load balancing is measured on the *clean* router so the noise can't
         # hide a collapse. f: fraction of top-k picks per sub-key (no grad).
         # balance_on_clean_picks=False reuses the training picks instead and
         # skips a second sub-key top-k per layer (small noise barely changes
         # them); pick_agreement is then not measured (NaN).
         clean = select_scores is scores or not self.balance_on_clean_picks
-        clean_idx = sub_idx if clean else _top_k(scores, k)[1]
-        f = jax.lax.stop_gradient(count_subkeys(clean_idx) / (M * k))  # [H, 2, n]
+        if clean:
+            member = select_scores >= sel_vals[..., -1:]
+        else:
+            clean_vals = _top_k(scores, k)[0]
+            member = scores >= clean_vals[..., -1:]
+        # exact up to ties at the k-th score (a zero-probability event for
+        # float scores), in which case a tied sub-key is counted too
+        f = jax.lax.stop_gradient(jnp.sum(member, axis=0, dtype=jnp.float32) / (M * k))  # [H, 2, n]
         # Share of the noisy sub-key picks that the clean router also makes.
         # Near 0 means the noise, not the router, decides what training reads
         # (Ultra-FineWeb, 512 sub-keys, routing_noise 1.0: 0.4% of the slots
@@ -224,14 +309,12 @@ class MemoryPool(nn.Module):
         elif clean:
             pick_agreement = jnp.full((), jnp.nan, jnp.float32)
         else:
-            pick_agreement = jnp.mean(jnp.any(sub_idx[..., :, None] == clean_idx[..., None, :], axis=-1))
+            pick_agreement = jnp.mean(sub_scores >= clean_vals[..., -1:])
         # P: mean router probability for each sub-key (differentiable).
         p_scores = scores if self.balance_temperature_grad else cos * jax.lax.stop_gradient(temperature)
         P = jax.nn.softmax(p_scores, axis=-1).mean(axis=0)  # [H, 2, n]
         # Equals 1 when routing is perfectly uniform; grows with collapse.
         balance_loss = n * jnp.mean(jnp.sum(f * P, axis=-1))
-
-        slot_counts = jnp.zeros((self.pool_size,), jnp.float32).at[slots.reshape(-1)].add(1.0)
 
         aux = {
             "balance_loss": balance_loss,

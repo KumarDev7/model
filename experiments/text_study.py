@@ -64,9 +64,23 @@ PROMPTS = ["The heart is a muscular organ that", "In 1969, the first humans", "T
 FREQ_BUCKETS = [(0, 10), (10, 100), (100, 1_000), (1_000, 10_000), (10_000, 100_000), (100_000, 10**12)]
 
 
+def device_env(device: str, per_gpu: int, slot: int) -> dict:
+    """Environment that pins a training process to one accelerator.
+    device "N" is CUDA GPU N; "tpuN" is TPU chip N of this host (one process
+    per chip, e.g. 8 arms at once on a v5e-8)."""
+    if device.startswith("tpu"):
+        chip = int(device[3:])
+        return {"TPU_VISIBLE_CHIPS": str(chip), "TPU_CHIPS_PER_PROCESS_BOUNDS": "1,1,1",
+                "TPU_PROCESS_BOUNDS": "1,1,1", "TPU_PROCESS_PORT": str(8476 + chip),
+                "TPU_PROCESS_ADDRESSES": f"localhost:{8476 + chip}", "CLOUD_TPU_TASK_ID": "0",
+                "TPU_ACCELERATOR_TYPE": "v5litepod-1"}
+    return {"CUDA_VISIBLE_DEVICES": device, "XLA_PYTHON_CLIENT_MEM_FRACTION": f"{0.9 / per_gpu:.2f}"}
+
+
 def launch(arms, common, out, gpus, per_gpu, only=None):
     """Train each arm (flags appended to `common`) as its own process,
-    per_gpu at a time on each listed GPU; skips arms already saved."""
+    per_gpu at a time on each listed device ("0,1" GPUs or "tpu0,...,tpu7"
+    TPU chips; see device_env); skips arms already saved."""
     ckpt = os.path.join(out, "ckpt")
     os.makedirs(ckpt, exist_ok=True)
     todo = [a for a in arms if (not only or a in only)
@@ -77,8 +91,7 @@ def launch(arms, common, out, gpus, per_gpu, only=None):
         free = [s for s in range(len(slots)) if s not in running]
         while todo and free:
             s, arm = free.pop(0), todo.pop(0)
-            env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(slots[s]),
-                   "XLA_PYTHON_CLIENT_MEM_FRACTION": f"{0.9 / per_gpu:.2f}"}
+            env = {**os.environ, **device_env(str(slots[s]), per_gpu, s)}
             cmd = [sys.executable, "-m", "memory_pool_model.train", *common, *arms[arm],
                    "--save", os.path.join(ckpt, arm + ".msgpack"), "--resume"]
             log = open(os.path.join(out, f"train_{arm}.log"), "a")

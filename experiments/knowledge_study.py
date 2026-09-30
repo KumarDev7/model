@@ -1,16 +1,21 @@
 """Does the pool store knowledge from real text? (facts-in-text benchmark)
 
 Data: experiments/facts_in_text.py (fictional people's facts written as
-sentences, mixed into Ultra-FineWeb). All arms: 4,000 steps x 8,192 tokens
-(~0.95 passes, ~37 sightings of each bio).
+sentences, mixed into Ultra-FineWeb). All arms: 6,000 steps x 8,192 tokens
+(~1.4 passes, ~55 sightings of each bio). Same backbone as text_study
+(d_model 256, 4 layers, FFN x4).
 
   dense, dense_2x, dense_4x   backbone alone at 1x / ~2x / ~4x size
-  pool                        + 262k-vector pool next to the FFN, cosine routing, 16 per head
-  pool_qs                     + routing scores scaled by query length (sharper reads)
-  pool_qs_k4                  + only 4 vectors per head
-  pool_qs_k4_nopen            same without the no-pool penalty
+  pool                        + 262k-vector pool read in layers 1 and 3, next to the FFN
+  pool_noffn                  pool read replaces the FFN in layers 1 and 3
+  pool_pen                    pool + the no-pool penalty
+  pool_qs_k4                  pool, scores scaled by query length, 4 vectors per head
+  *_s1                        second seed
 
-Commands (run on the GPU machine):
+experiments/knowledge_verify.py tests the trained arms (where the knowledge
+is, whether the backbone reads it, collapse, writing new facts to the pool).
+
+Commands (run on the accelerator machine; on a single TPU use --per_gpu 1):
   train     train the arms
   analyze   fact recall (seen / new wordings, pool on / off), held-out and
             Shakespeare perplexity, pool usage and read sharpness
@@ -41,20 +46,29 @@ from . import facts_in_text as fit
 from . import text_study as ts
 
 BACKBONE = ts.BACKBONE
+# current defaults: routing noise 0.1, lazy Adam on the pool, no no-pool
+# penalty on text (--task tokens)
 POOL = ["--memory_layers", "1,3", "--n_sub_keys", "512", "--d_key", "128", "--d_value", "256",
-        "--memory_ffn", "true", "--nopool_true_coef", "1.0",
-        "--routing_noise", "1.0", "--pool_optimizer", "rowwise_adagrad"]  # as run (defaults changed since)
+        "--memory_ffn", "true"]
 QS = ["--router_query_scale", "true"]
 ARMS = {
+    # pool next to the FFN; nothing pushes knowledge into it
     "pool": POOL,
-    "pool_qs": POOL + QS,
+    # pool read replaces the FFN in the two memory layers
+    "pool_noffn": POOL[:-2] + ["--memory_ffn", "false"],
+    # + the no-pool penalty (on every token: text has no answer mask)
+    "pool_pen": POOL + ["--nopool_true_coef", "1.0"],
+    # sharper reads: scores scaled by query length, 4 vectors per head
     "pool_qs_k4": POOL + QS + ["--top_k", "4"],
-    "pool_qs_k4_nopen": POOL + QS + ["--top_k", "4", "--nopool_true_coef", "0.0"],
     "dense": ["--use_memory", "false"],
     "dense_2x": ["--use_memory", "false", "--d_model", "384"],
     "dense_4x": ["--use_memory", "false", "--d_model", "512", "--n_layers", "6"],
+    # second seeds (training order and init; same data)
+    "pool_s1": POOL + ["--seed", "1"],
+    "pool_noffn_s1": POOL[:-2] + ["--memory_ffn", "false", "--seed", "1"],
+    "dense_s1": ["--use_memory", "false", "--seed", "1"],
 }
-PILOT = {k: ARMS[k] for k in ("pool", "pool_qs", "pool_qs_k4")}
+PILOT = {k: ARMS[k] for k in ("pool", "dense")}
 
 
 def load_facts(data):
@@ -104,7 +118,10 @@ def analyze(data, out, n_windows, only=None):
 def finetune(mcfg, params, tcfg, data_arr, steps, seed=0):
     tr = Trainer(mcfg, tcfg, donate=True)
     state = tr.init(jax.random.PRNGKey(seed))
-    state = state.replace(params=jax.tree_util.tree_map(jnp.asarray, params))
+    # copy: the train step donates its state, and jnp.asarray would hand it
+    # the caller's buffers (the trained model would be deleted after the
+    # first fine-tune)
+    state = state.replace(params=jax.tree_util.tree_map(lambda x: jnp.array(x, copy=True), params))
     if tr.sparse:
         state = state.replace(opt_state=tr.optimizer.init(split_values(state.params)[1]))
     else:
@@ -225,7 +242,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", required=True)
     ap.add_argument("--gpus", default="0")
     ap.add_argument("--per_gpu", type=int, default=1)
-    ap.add_argument("--steps", type=int, default=4000)
+    ap.add_argument("--steps", type=int, default=6000)
     ap.add_argument("--windows", type=int, default=512)
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--arm", default="pool")

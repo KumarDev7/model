@@ -1,0 +1,453 @@
+[
+ {
+  "arm": "pool_s1",
+  "flags": "--memory_layers 1,3 --n_sub_keys 512 --d_key 128 --d_value 256 --memory_ffn true --seed 1",
+  "params_total": 75316737,
+  "params_on_accelerator_without_pool_values": 8207873,
+  "train_seconds": 570.6351642608643,
+  "history": [
+   {
+    "step": 1000,
+    "ce": 5.80821567773819,
+    "acc": 0.1602020263671875,
+    "acc_nopool": 0.1361083984375,
+    "acc_shuffled_pool": 0.1353912353515625,
+    "ce_shuffled_pool": 6.146416783332825,
+    "pool_coverage": 0.795166015625,
+    "pool_active": 0.5580825805664062,
+    "pool_spread": 0.1959867775440216
+   },
+   {
+    "step": 2000,
+    "ce": 5.1641324162483215,
+    "acc": 0.200714111328125,
+    "acc_nopool": 0.1476898193359375,
+    "acc_shuffled_pool": 0.1440887451171875,
+    "ce_shuffled_pool": 5.8844311237335205,
+    "pool_coverage": 0.9094047546386719,
+    "pool_active": 0.7218170166015625,
+    "pool_spread": 0.33273738622665405
+   },
+   {
+    "step": 3000,
+    "ce": 4.841421008110046,
+    "acc": 0.2283172607421875,
+    "acc_nopool": 0.1560821533203125,
+    "acc_shuffled_pool": 0.14947509765625,
+    "ce_shuffled_pool": 5.757269024848938,
+    "pool_coverage": 0.94384765625,
+    "pool_active": 0.7837409973144531,
+    "pool_spread": 0.3823050260543823
+   },
+   {
+    "step": 4000,
+    "ce": 4.599568128585815,
+    "acc": 0.2578277587890625,
+    "acc_nopool": 0.16851806640625,
+    "acc_shuffled_pool": 0.159210205078125,
+    "ce_shuffled_pool": 5.6504369378089905,
+    "pool_coverage": 0.9610443115234375,
+    "pool_active": 0.8231124877929688,
+    "pool_spread": 0.4221309721469879
+   },
+   {
+    "step": 5000,
+    "ce": 4.4759737849235535,
+    "acc": 0.271026611328125,
+    "acc_nopool": 0.1744384765625,
+    "acc_shuffled_pool": 0.163238525390625,
+    "ce_shuffled_pool": 5.618225514888763,
+    "pool_coverage": 0.9665069580078125,
+    "pool_active": 0.8392677307128906,
+    "pool_spread": 0.4372047483921051
+   },
+   {
+    "step": 6000,
+    "ce": 4.425403654575348,
+    "acc": 0.2772216796875,
+    "acc_nopool": 0.1732025146484375,
+    "acc_shuffled_pool": 0.1605072021484375,
+    "ce_shuffled_pool": 5.625660598278046,
+    "pool_coverage": 0.9700546264648438,
+    "pool_active": 0.850616455078125,
+    "pool_spread": 0.44963765144348145
+   }
+  ],
+  "recall": {
+   "A_trained/seen_wording": {
+    "items": 32000,
+    "normal": 0.29146875,
+    "normal_logprob": -2.6496827602386475,
+    "by_relation": {
+     "born": 0.101625,
+     "job": 0.4515,
+     "study": 0.260875,
+     "food": 0.351875
+    },
+    "shuffled": 0.00015625,
+    "shuffled_logprob": -13.664817810058594,
+    "removed": 3.125e-05,
+    "removed_logprob": -12.17508602142334
+   },
+   "A_trained/new_wording": {
+    "items": 16000,
+    "normal": 0.015375,
+    "normal_logprob": -8.198240280151367,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.04225,
+     "study": 0.0,
+     "food": 0.01925
+    },
+    "shuffled": 0.0,
+    "shuffled_logprob": -15.09897232055664,
+    "removed": 0.0,
+    "removed_logprob": -14.238814353942871
+   },
+   "B_never_seen/seen_wording": {
+    "items": 4800,
+    "normal": 0.026458333333333334,
+    "normal_logprob": -4.348763465881348,
+    "by_relation": {
+     "born": 0.0125,
+     "job": 0.0425,
+     "study": 0.0225,
+     "food": 0.028333333333333332
+    },
+    "shuffled": 0.0,
+    "shuffled_logprob": -13.865381240844727,
+    "removed": 0.0,
+    "removed_logprob": -12.444259643554688
+   },
+   "B_never_seen/new_wording": {
+    "items": 2400,
+    "normal": 0.007916666666666667,
+    "normal_logprob": -8.41577434539795,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.025,
+     "study": 0.0,
+     "food": 0.006666666666666667
+    },
+    "shuffled": 0.0,
+    "shuffled_logprob": -15.32242488861084,
+    "removed": 0.0,
+    "removed_logprob": -14.460631370544434
+   }
+  },
+  "reliance": {
+   "loss": {
+    "web_heldout": {
+     "normal": 4.425403535366058,
+     "normal_ppl": 83.54651439383466,
+     "shuffled": 5.625660598278046,
+     "shuffled_ppl": 277.4555106296018,
+     "removed": 5.508830487728119,
+     "removed_ppl": 246.86224974722074
+    },
+    "bios_known_people": {
+     "normal": 0.4082466810941696,
+     "normal_ppl": 1.5041781677243193,
+     "shuffled": 4.093455255031586,
+     "shuffled_ppl": 59.946665287555795,
+     "removed": 3.370123326778412,
+     "removed_ppl": 29.08211344000401
+    },
+    "bios_unknown_people": {
+     "normal": 1.1113941967487335,
+     "normal_ppl": 3.0385918374842156,
+     "shuffled": 4.222150504589081,
+     "shuffled_ppl": 68.17994803863209,
+     "removed": 3.5188445448875427,
+     "removed_ppl": 33.74541461697451
+    }
+   },
+   "greedy_born_in": {
+    "normal": {
+     "correct": 0.15,
+     "samples": [
+      {
+       "name": "Rasnarfen Rovel",
+       "truth": "Lima",
+       "generated": "Denver."
+      },
+      {
+       "name": "Narqueldov Queloskosk",
+       "truth": "Salzburg",
+       "generated": "Dublin."
+      },
+      {
+       "name": "Isyar Roultor",
+       "truth": "Malaga",
+       "generated": "Malaga."
+      },
+      {
+       "name": "Oskvel Lumjen",
+       "truth": "Seville",
+       "generated": "Porto."
+      },
+      {
+       "name": "Silnar Druquelul",
+       "truth": "Tunis",
+       "generated": "Quito."
+      },
+      {
+       "name": "Issilcle Yarsiltor",
+       "truth": "Tunis",
+       "generated": "Tbilis"
+      },
+      {
+       "name": "Yarnaris Jenlum",
+       "truth": "Minsk",
+       "generated": "Porto."
+      },
+      {
+       "name": "Halsilpim Gortor",
+       "truth": "Austin",
+       "generated": "Austin."
+      }
+     ]
+    },
+    "shuffled": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Rasnarfen Rovel",
+       "truth": "Lima",
+       "generated": "the early early early"
+      },
+      {
+       "name": "Narqueldov Queloskosk",
+       "truth": "Salzburg",
+       "generated": "his he he he"
+      },
+      {
+       "name": "Isyar Roultor",
+       "truth": "Malaga",
+       "generated": "the same of the"
+      },
+      {
+       "name": "Oskvel Lumjen",
+       "truth": "Seville",
+       "generated": "the world."
+      },
+      {
+       "name": "Silnar Druquelul",
+       "truth": "Tunis",
+       "generated": "the young and the"
+      },
+      {
+       "name": "Issilcle Yarsiltor",
+       "truth": "Tunis",
+       "generated": "the mind."
+      },
+      {
+       "name": "Yarnaris Jenlum",
+       "truth": "Minsk",
+       "generated": "the young young young"
+      },
+      {
+       "name": "Halsilpim Gortor",
+       "truth": "Austin",
+       "generated": "the in the in"
+      }
+     ]
+    },
+    "removed": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Rasnarfen Rovel",
+       "truth": "Lima",
+       "generated": "the city in the"
+      },
+      {
+       "name": "Narqueldov Queloskosk",
+       "truth": "Salzburg",
+       "generated": "the he he he"
+      },
+      {
+       "name": "Isyar Roultor",
+       "truth": "Malaga",
+       "generated": "the city."
+      },
+      {
+       "name": "Oskvel Lumjen",
+       "truth": "Seville",
+       "generated": "the city."
+      },
+      {
+       "name": "Silnar Druquelul",
+       "truth": "Tunis",
+       "generated": "the city."
+      },
+      {
+       "name": "Issilcle Yarsiltor",
+       "truth": "Tunis",
+       "generated": "the III"
+      },
+      {
+       "name": "Yarnaris Jenlum",
+       "truth": "Minsk",
+       "generated": "the he he he"
+      },
+      {
+       "name": "Halsilpim Gortor",
+       "truth": "Austin",
+       "generated": "the city in the"
+      }
+     ]
+    }
+   }
+  },
+  "usage": {
+   "temperature": 15.292075266545897,
+   "web_heldout": [
+    {
+     "coverage": 0.704345703125,
+     "active": 0.5953521728515625,
+     "spread": 0.22832704648434882,
+     "max_share_x_fair": 145.375,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.2031895760446787
+    },
+    {
+     "coverage": 0.8850631713867188,
+     "active": 0.7865028381347656,
+     "spread": 0.3754320902722825,
+     "max_share_x_fair": 103.75,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.18147435784339905
+    }
+   ],
+   "web_heldout_all_layers": {
+    "coverage": 0.9700660705566406,
+    "active": 0.8505859375,
+    "spread": 0.4496350134894024,
+    "max_share_x_fair": 72.75,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.19233196694403887
+   },
+   "bios_known_people": [
+    {
+     "coverage": 0.2430267333984375,
+     "active": 0.20200347900390625,
+     "spread": 0.056036857176764814,
+     "max_share_x_fair": 550.3125,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.21706580184400082
+    },
+    {
+     "coverage": 0.6223564147949219,
+     "active": 0.5015449523925781,
+     "spread": 0.14999282013292206,
+     "max_share_x_fair": 276.9375,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.22664114460349083
+    }
+   ],
+   "bios_known_people_all_layers": {
+    "coverage": 0.7139320373535156,
+    "active": 0.4884910583496094,
+    "spread": 0.166378306820017,
+    "max_share_x_fair": 275.46875,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.22185347322374582
+   },
+   "fact_answers": [
+    {
+     "coverage": 0.06828689575195312,
+     "active": 0.06828689575195312,
+     "spread": 0.017537426803229977,
+     "max_share_x_fair": 922.8713976534913,
+     "subkeys_used": 0.9814453125,
+     "top1_weight": 0.21232706308364868,
+     "effective_vectors_per_head": 10.23734188079834
+    },
+    {
+     "coverage": 0.13553619384765625,
+     "active": 0.13553619384765625,
+     "spread": 0.036800280660369514,
+     "max_share_x_fair": 493.6288871169837,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.21920794248580933,
+     "effective_vectors_per_head": 10.381754875183105
+    }
+   ]
+  },
+  "targeted": {
+   "n_facts": 200,
+   "levels": [
+    {
+     "vectors_zeroed_per_head_per_read": 1,
+     "vectors_zeroed_mean": 30.39,
+     "share_of_pool": 0.00011592864990234375,
+     "overlap_own_vs_other_person": 0.17225849113809893,
+     "recall_after": {
+      "own": {
+       "seen": 0.2625,
+       "new": 0.005
+      },
+      "other_person_same_relation": {
+       "seen": 0.62625,
+       "new": 0.03
+      },
+      "random": {
+       "seen": 1.0,
+       "new": 0.0375
+      }
+     },
+     "other_facts_before": 0.23375,
+     "other_facts_after_own_zeroed": 0.21270833333333336
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 4,
+     "vectors_zeroed_mean": 110.665,
+     "share_of_pool": 0.00042215347290039065,
+     "overlap_own_vs_other_person": 0.23748716528165859,
+     "recall_after": {
+      "own": {
+       "seen": 0.0425,
+       "new": 0.0025
+      },
+      "other_person_same_relation": {
+       "seen": 0.28625,
+       "new": 0.0125
+      },
+      "random": {
+       "seen": 0.99625,
+       "new": 0.035
+      }
+     },
+     "other_facts_before": 0.24208333333333332,
+     "other_facts_after_own_zeroed": 0.18895833333333337
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 16,
+     "vectors_zeroed_mean": 414.015,
+     "share_of_pool": 0.0015793418884277343,
+     "overlap_own_vs_other_person": 0.2605266356419597,
+     "recall_after": {
+      "own": {
+       "seen": 0.00625,
+       "new": 0.0
+      },
+      "other_person_same_relation": {
+       "seen": 0.14125,
+       "new": 0.015
+      },
+      "random": {
+       "seen": 0.99,
+       "new": 0.0375
+      }
+     },
+     "other_facts_before": 0.23178442028985505,
+     "other_facts_after_own_zeroed": 0.1679891304347826
+    }
+   ],
+   "new_wording_recall_before": 0.0375,
+   "seen_wording_recall_before": 1.0
+  },
+  "verify_seconds": 101.16388654708862
+ }
+]

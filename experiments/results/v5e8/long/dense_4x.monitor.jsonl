@@ -1,0 +1,2 @@
+{"step": 20000, "time": 1790714042.509496, "recall_seen_normal": 0.03208333333333333, "recall_new_normal": 0.01, "recall_never_seen": 0.034, "heldout_loss_normal": 3.9786667823791504}
+{"step": 120000, "time": 1790716291.9475725, "recall_seen_normal": 0.7313333333333333, "recall_new_normal": 0.00875, "recall_never_seen": 0.035833333333333335, "heldout_loss_normal": 3.5381089448928833}

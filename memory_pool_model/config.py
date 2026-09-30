@@ -152,6 +152,14 @@ class TrainConfig:
     # backbone 1.857). Fact task, 2 seeds: 100% with either (Adagrad 99.99%).
     # (With the old recipe Adagrad had looked better: 99.8% vs 97.9%.)
     pool_optimizer: str = "adam"
+    # How the sparse update gathers the fetched rows' gradients: "dense"
+    # scatter-adds them into a zero [pool_size, D] table and updates the
+    # touched rows with a masked pass over the table (no sort; faster on
+    # TPU, but its work grows with pool size; data parallel all-reduces the
+    # table); "unique" sorts the fetched slots and works on those rows only
+    # (host pools, very large pools). "auto": dense for a device pool on TPU
+    # (one v5e: 19 + 2 ms vs 32 ms per step), unique elsewhere.
+    pool_row_grads: str = "auto"
     # Split each batch across all local devices (data parallel).
     data_parallel: bool = False
     # Save a resumable checkpoint every N steps (0 = only at the end).

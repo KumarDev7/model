@@ -1,0 +1,87 @@
+[
+ {
+  "arm": "pool",
+  "steps": 1500,
+  "before": {
+   "A": {
+    "normal": 0.6675,
+    "shuffled": 0.0015,
+    "removed": 0.0005
+   },
+   "B": {
+    "normal": 0.03025,
+    "shuffled": 0.000125,
+    "removed": 0.0
+   },
+   "B_new_wording": {
+    "normal": 0.008875,
+    "shuffled": 0.0,
+    "removed": 0.0
+   },
+   "heldout_ppl": 97.29668013629909
+  },
+  "after": {
+   "full_finetune": {
+    "A": {
+     "normal": 0.061,
+     "shuffled": 0.0,
+     "removed": 0.001
+    },
+    "B": {
+     "normal": 0.982625,
+     "shuffled": 0.0009375,
+     "removed": 0.001125
+    },
+    "B_new_wording": {
+     "normal": 0.02475,
+     "shuffled": 0.0,
+     "removed": 0.0
+    },
+    "heldout_ppl": 101.87626934338545,
+    "seconds": 144.6507556438446
+   },
+   "pool_vectors_only": {
+    "A": {
+     "normal": 0.2045,
+     "shuffled": 0.001,
+     "removed": 0.0005
+    },
+    "B": {
+     "normal": 0.9175625,
+     "shuffled": 0.0001875,
+     "removed": 0.0
+    },
+    "B_new_wording": {
+     "normal": 0.0245,
+     "shuffled": 0.0,
+     "removed": 0.0
+    },
+    "heldout_ppl": 97.53787132870697,
+    "seconds": 143.44443655014038,
+    "backbone_unchanged": true,
+    "pool_vectors_changed": 1.0
+   },
+   "pool_vectors_only_with_replay": {
+    "A": {
+     "normal": 0.782,
+     "shuffled": 0.001,
+     "removed": 0.0005
+    },
+    "B": {
+     "normal": 0.8561875,
+     "shuffled": 0.0001875,
+     "removed": 0.0
+    },
+    "B_new_wording": {
+     "normal": 0.019,
+     "shuffled": 0.0,
+     "removed": 0.0
+    },
+    "heldout_ppl": 98.0144187817753,
+    "seconds": 144.57274174690247,
+    "backbone_unchanged": true,
+    "pool_vectors_changed": 1.0
+   }
+  }
+ }
+]

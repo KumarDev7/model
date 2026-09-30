@@ -1,0 +1,6 @@
+{"step": 20000, "time": 1790720376.6260424, "recall_seen_normal": 0.03158333333333333, "recall_new_normal": 0.004166666666666667, "recall_never_seen": 0.029333333333333333, "heldout_loss_normal": 3.9622180461883545}
+{"step": 40000, "time": 1790720565.2315161, "recall_seen_normal": 0.041, "recall_new_normal": 0.008333333333333333, "recall_never_seen": 0.0335, "heldout_loss_normal": 3.7799187898635864}
+{"step": 60000, "time": 1790720868.1788568, "recall_seen_normal": 0.0805, "recall_new_normal": 0.008333333333333333, "recall_never_seen": 0.025333333333333333, "heldout_loss_normal": 3.683566451072693}
+{"step": 80000, "time": 1790721169.3365843, "recall_seen_normal": 0.28708333333333336, "recall_new_normal": 0.005833333333333334, "recall_never_seen": 0.03133333333333333, "heldout_loss_normal": 3.606836676597595}
+{"step": 100000, "time": 1790721529.892514, "recall_seen_normal": 0.5741666666666667, "recall_new_normal": 0.005833333333333334, "recall_never_seen": 0.025333333333333333, "heldout_loss_normal": 3.553185224533081}
+{"step": 120000, "time": 1790721830.3264215, "recall_seen_normal": 0.6963333333333334, "recall_new_normal": 0.00625, "recall_never_seen": 0.0305, "heldout_loss_normal": 3.5319533348083496}

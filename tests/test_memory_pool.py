@@ -63,6 +63,30 @@ def test_top_k_by_max_matches_lax_top_k():
         np.testing.assert_array_equal(v, v2)
 
 
+def test_pallas_top_k_matches_lax_top_k():
+    from memory_pool_model import topk_pallas
+    x = jax.random.normal(jax.random.PRNGKey(0), (40, 256))  # rows not a multiple of the block
+    x = x.at[3, :].set(0.0).at[3, 7].set(1.0)  # ties: lowest index first
+    v, i = topk_pallas.top_k(x, 5, interpret=True)
+    v_ref, i_ref = jax.lax.top_k(x, 5)
+    np.testing.assert_array_equal(i, i_ref)
+    np.testing.assert_array_equal(v, v_ref)
+    assert topk_pallas.supported(512, 16) and not topk_pallas.supported(16, 4)
+
+
+def test_onehot_take_matches_gather_and_its_gradient():
+    from memory_pool_model.memory import _onehot_take, _onehot_take_diff
+    x = jax.random.normal(jax.random.PRNGKey(0), (3, 4, 2, 32))
+    idx = jax.random.randint(jax.random.PRNGKey(1), (3, 4, 2, 5), 0, 32)
+    g = jax.random.normal(jax.random.PRNGKey(2), idx.shape)
+    ref, ref_vjp = jax.vjp(lambda x: jnp.take_along_axis(x, idx, -1), x)
+    out, vjp = jax.vjp(lambda x: _onehot_take_diff(x, idx, 32), x)
+    np.testing.assert_allclose(out, ref, rtol=1e-6)
+    np.testing.assert_allclose(vjp(g)[0], ref_vjp(g)[0], rtol=1e-6, atol=1e-6)  # repeated indices add up
+    ints = jax.random.randint(jax.random.PRNGKey(3), (3, 4, 16), 0, 100)
+    np.testing.assert_array_equal(_onehot_take(ints, idx[:, :, 0] % 16), jnp.take_along_axis(ints, idx[:, :, 0] % 16, -1))
+
+
 def test_noise_changes_selection_only_in_training():
     pool, params, q = make_pool(noise=5.0)
     rngs = {"routing": jax.random.PRNGKey(3)}
@@ -345,6 +369,38 @@ def test_sparse_row_grads_equal_dense_grads():
     # rows that were never fetched have exactly zero gradient
     untouched = np.setdiff1d(np.arange(trainer.mcfg.pool_size), np.asarray(uniq))
     assert np.all(np.asarray(g_full["pool"]["values"])[untouched] == 0)
+    # the sort-free dense version gives the same table
+    from memory_pool_model.train import fetched_row_grads_dense
+    dense_rows = fetched_row_grads_dense(aux, g_probe, [1], trainer.mcfg.pool_size)
+    np.testing.assert_allclose(dense_rows, g_full["pool"]["values"], rtol=1e-4, atol=1e-6)
+
+
+@pytest.mark.parametrize("pool_optimizer", ["adam", "rowwise_adagrad"])
+def test_dense_and_unique_row_grads_train_the_same(pool_optimizer):
+    ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+    mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                       n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4)
+    states, metrics = [], []
+    for mode in ("dense", "unique"):
+        tr = Trainer(mcfg, TrainConfig(batch_size=16, warmup_steps=2, pool_row_grads=mode,
+                                       pool_optimizer=pool_optimizer))
+        assert tr.dense_row_grads == (mode == "dense")
+        s = tr.init(jax.random.PRNGKey(0))
+        rng = np.random.default_rng(0)
+        for i in range(6):
+            s, m, _ = tr.train_step(s, ds.sample(rng, 16), jax.random.PRNGKey(i))
+        states.append(s)
+        metrics.append(m)
+    assert int(metrics[0]["rows_updated"]) == int(metrics[1]["rows_updated"])
+    flat = jax.tree_util.tree_flatten_with_path(states[0])[0]
+    for (path, a), b in zip(flat, jax.tree_util.tree_leaves(states[1])):
+        # attention key biases have a true gradient of exactly 0 (softmax
+        # ignores a shift shared by all keys): they only see rounding noise,
+        # which Adam scales up to full-size steps, so they differ between
+        # any two summation orders
+        if "['key']['bias']" in jax.tree_util.keystr(path):
+            continue
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-4, atol=1e-6)
 
 
 def test_sparse_update_changes_only_fetched_rows():
@@ -398,7 +454,8 @@ def test_resume_is_exact(tmp_path):
         np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
 
 
-def test_data_parallel_matches_single_device():
+@pytest.mark.parametrize("row_grads", ["unique", "dense"])
+def test_data_parallel_matches_single_device(row_grads):
     """Runs in a subprocess with 2 virtual CPU devices."""
     import subprocess, sys, textwrap
     code = textwrap.dedent("""
@@ -411,7 +468,7 @@ def test_data_parallel_matches_single_device():
         ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
         mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
                            n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4, routing_noise=0.0)
-        tcfg = TrainConfig(steps=10, batch_size=16, warmup_steps=2)
+        tcfg = TrainConfig(steps=10, batch_size=16, warmup_steps=2, pool_row_grads="ROW_GRADS")
         out = []
         for mesh in (None, Mesh(np.array(jax.devices()), ("data",))):
             tr = Trainer(mcfg, tcfg, mesh=mesh)
@@ -430,7 +487,7 @@ def test_data_parallel_matches_single_device():
                 continue
             np.testing.assert_allclose(a, b, rtol=2e-3, atol=2e-5)
         print("OK")
-    """)
+    """).replace("ROW_GRADS", row_grads)
     env = {**__import__("os").environ, "XLA_FLAGS": "--xla_force_host_platform_device_count=2",
            "JAX_PLATFORMS": "cpu"}
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=600)

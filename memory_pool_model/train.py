@@ -164,6 +164,22 @@ def fetched_row_grads(aux, probe_grads, layers, pool_size):
     return _merge_rows(slots, contribs, pool_size)
 
 
+def fetched_row_grads_dense(aux, probe_grads, layers, pool_size):
+    """fetched_row_grads as a dense [pool_size, D] table (zero on rows not
+    fetched), built with one scatter-add. No sort: on TPU v5e (1M fetches x
+    256 dims into 262k rows) 19 ms against 32 ms for unique + segment_sum;
+    the optimizer then updates the fetched rows with a masked dense pass
+    (~2 ms for 67M values). Needs the pool on the device."""
+    d = probe_grads[layers[0]].shape[-1]
+    g = jnp.zeros((pool_size, d), jnp.float32)
+    for layer, sl, w in zip(layers, aux["slots"], aux["weights"]):
+        gl = probe_grads[layer].reshape(-1, 1, d)  # [BT, 1, D]
+        sl = sl.reshape(gl.shape[0], -1)  # [BT, H*k]
+        w = jax.lax.stop_gradient(w).reshape(sl.shape)
+        g = g.at[sl.reshape(-1)].add((w[..., None] * gl).reshape(-1, d))
+    return g
+
+
 def _merge_rows(slots, contribs, pool_size):
     """Sum contributions per distinct slot. Padding slots (== pool_size)
     sort last and are dropped by the caller's scatters."""
@@ -225,6 +241,16 @@ class Trainer:
         self.mcfg, self.tcfg = mcfg, tcfg
         self.model = MemoryPoolLM(mcfg)
         self.sparse = mcfg.use_memory and tcfg.sparse_pool_updates
+        if tcfg.pool_row_grads not in ("auto", "dense", "unique"):
+            raise ValueError(f"unknown pool_row_grads {tcfg.pool_row_grads!r}")
+        # under data parallelism the dense table is scatter-added on each
+        # device and all-reduced (one [N, D] psum) by GSPMD
+        dense_ok = self.host is None
+        if tcfg.pool_row_grads == "dense" and not dense_ok:
+            raise ValueError("pool_row_grads='dense' needs the pool on the device")
+        want_dense = tcfg.pool_row_grads == "dense" or (
+            tcfg.pool_row_grads == "auto" and jax.default_backend() == "tpu")
+        self.dense_row_grads = self.sparse and dense_ok and want_dense
         self.schedule = make_schedule(tcfg)
         self.optimizer = make_optimizer(tcfg, clip=not self.sparse)
         self.mesh = mesh
@@ -389,7 +415,12 @@ class Trainer:
 
             (_, (metrics, aux)), (g_rest, g_probe) = jax.value_and_grad(
                 loss_fn, argnums=(0, 1), has_aux=True)(rest, probes)
-            if self.mesh is not None:
+            dense_rows = self.dense_row_grads
+            if dense_rows:
+                # g_rows: [N, D], zero outside the fetched rows `touched`
+                g_rows = fetched_row_grads_dense(aux, g_probe, layers, self.mcfg.pool_size)
+                touched = aux["slot_counts"] > 0
+            elif self.mesh is not None:
                 uniq, g_rows = fetched_row_grads_sharded(aux, g_probe, layers, self.mcfg.pool_size, self.mesh)
             else:
                 uniq, g_rows = fetched_row_grads(aux, g_probe, layers, self.mcfg.pool_size)
@@ -411,6 +442,19 @@ class Trainer:
             if values is None:
                 # host pool: the trainer applies lazy Adam on the host
                 metrics["_pool_slots"], metrics["_pool_grads"] = uniq, g_rows
+            elif dense_rows:
+                # the same lazy update as below, as a masked pass over the table
+                lr = self.schedule(state.step) * t.pool_lr_mult
+                tm = touched[:, None]
+                if t.pool_optimizer == "rowwise_adagrad":
+                    pool_v = pool_v + jnp.where(touched, jnp.mean(g_rows**2, axis=-1), 0.0)
+                    values = values - jnp.where(tm, (lr / (jnp.sqrt(pool_v) + 1e-8))[:, None] * g_rows, 0.0)
+                else:
+                    n = (state.step + 1).astype(jnp.float32)
+                    pool_m = jnp.where(tm, ADAM_B1 * pool_m + (1 - ADAM_B1) * g_rows, pool_m)
+                    pool_v = jnp.where(tm, ADAM_B2 * pool_v + (1 - ADAM_B2) * g_rows**2, pool_v)
+                    step_rows = -lr * (pool_m / (1 - ADAM_B1**n)) / (jnp.sqrt(pool_v / (1 - ADAM_B2**n)) + ADAM_EPS)
+                    values = values + jnp.where(tm, step_rows, 0.0)
             elif t.pool_optimizer == "rowwise_adagrad":
                 lr = self.schedule(state.step) * t.pool_lr_mult
                 acc = jnp.take(pool_v, uniq, mode="fill", fill_value=0) + jnp.mean(g_rows**2, axis=-1)
@@ -428,7 +472,7 @@ class Trainer:
                 pool_v = pool_v.at[uniq].set(v_rows, mode="drop")
             params = merge_values(rest, values)
             metrics["grad_norm"] = gnorm
-            metrics["rows_updated"] = jnp.sum(uniq < self.mcfg.pool_size)
+            metrics["rows_updated"] = jnp.sum(touched) if dense_rows else jnp.sum(uniq < self.mcfg.pool_size)
         else:
             grad_fn = jax.value_and_grad(self._loss, has_aux=True)
             (_, (metrics, aux)), grads = grad_fn(state.params, batch, r_loss, True, route, nopool,
@@ -603,6 +647,12 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
     np_rng = np.random.default_rng(tcfg.seed)
     history = []
     ckpt = save_path + ".state" if save_path else None
+    if save_path:
+        # configs next to the resumable checkpoint, so tools can load it
+        # while training runs (the final <save>.json is written at the end)
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+        with open(save_path + ".config.json", "w") as f:
+            json.dump({"model": dataclasses.asdict(mcfg), "train": dataclasses.asdict(tcfg), **(meta or {})}, f)
     if resume and ckpt and os.path.exists(ckpt):
         state, np_rng, history = load_checkpoint(ckpt, state, trainer.host)
         print(f"resumed from {ckpt} at step {int(state.step)}")

@@ -1,0 +1,453 @@
+[
+ {
+  "arm": "pool_pen",
+  "flags": "--memory_layers 1,3 --n_sub_keys 512 --d_key 128 --d_value 256 --memory_ffn true --nopool_true_coef 1.0",
+  "params_total": 75316737,
+  "params_on_accelerator_without_pool_values": 8207873,
+  "train_seconds": 635.0975396633148,
+  "history": [
+   {
+    "step": 1000,
+    "ce": 5.809591889381409,
+    "acc": 0.15948486328125,
+    "acc_nopool": 0.000335693359375,
+    "acc_shuffled_pool": 0.002960205078125,
+    "ce_shuffled_pool": 26.59702444076538,
+    "pool_coverage": 0.78460693359375,
+    "pool_active": 0.5452919006347656,
+    "pool_spread": 0.18707361817359924
+   },
+   {
+    "step": 2000,
+    "ce": 5.189179301261902,
+    "acc": 0.196990966796875,
+    "acc_nopool": 0.000152587890625,
+    "acc_shuffled_pool": 0.0092926025390625,
+    "ce_shuffled_pool": 20.009116649627686,
+    "pool_coverage": 0.9199562072753906,
+    "pool_active": 0.7338790893554688,
+    "pool_spread": 0.3360816538333893
+   },
+   {
+    "step": 3000,
+    "ce": 4.868660807609558,
+    "acc": 0.2235260009765625,
+    "acc_nopool": 1.52587890625e-05,
+    "acc_shuffled_pool": 0.01690673828125,
+    "ce_shuffled_pool": 19.72317624092102,
+    "pool_coverage": 0.9525833129882812,
+    "pool_active": 0.8009223937988281,
+    "pool_spread": 0.39666488766670227
+   },
+   {
+    "step": 4000,
+    "ce": 4.644842743873596,
+    "acc": 0.2486419677734375,
+    "acc_nopool": 4.57763671875e-05,
+    "acc_shuffled_pool": 0.0232086181640625,
+    "ce_shuffled_pool": 22.621225357055664,
+    "pool_coverage": 0.9661407470703125,
+    "pool_active": 0.8347206115722656,
+    "pool_spread": 0.4328141510486603
+   },
+   {
+    "step": 5000,
+    "ce": 4.5145233273506165,
+    "acc": 0.2646636962890625,
+    "acc_nopool": 3.0517578125e-05,
+    "acc_shuffled_pool": 0.02001953125,
+    "ce_shuffled_pool": 25.676451206207275,
+    "pool_coverage": 0.9721527099609375,
+    "pool_active": 0.8539352416992188,
+    "pool_spread": 0.4515977203845978
+   },
+   {
+    "step": 6000,
+    "ce": 4.454117298126221,
+    "acc": 0.2711334228515625,
+    "acc_nopool": 4.57763671875e-05,
+    "acc_shuffled_pool": 0.0312652587890625,
+    "ce_shuffled_pool": 21.951452255249023,
+    "pool_coverage": 0.9742279052734375,
+    "pool_active": 0.8610267639160156,
+    "pool_spread": 0.4613495171070099
+   }
+  ],
+  "recall": {
+   "A_trained/seen_wording": {
+    "items": 32000,
+    "normal": 0.53053125,
+    "normal_logprob": -1.766498327255249,
+    "by_relation": {
+     "born": 0.33925,
+     "job": 0.63675,
+     "study": 0.7,
+     "food": 0.446125
+    },
+    "shuffled": 3.125e-05,
+    "shuffled_logprob": -15.362582206726074,
+    "removed": 0.0,
+    "removed_logprob": -115.56265258789062
+   },
+   "A_trained/new_wording": {
+    "items": 16000,
+    "normal": 0.02575,
+    "normal_logprob": -8.443251609802246,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.07725,
+     "study": 0.0,
+     "food": 0.02575
+    },
+    "shuffled": 0.0,
+    "shuffled_logprob": -19.902124404907227,
+    "removed": 0.0,
+    "removed_logprob": -98.29550170898438
+   },
+   "B_never_seen/seen_wording": {
+    "items": 4800,
+    "normal": 0.028333333333333332,
+    "normal_logprob": -4.9942216873168945,
+    "by_relation": {
+     "born": 0.035,
+     "job": 0.03166666666666667,
+     "study": 0.0225,
+     "food": 0.024166666666666666
+    },
+    "shuffled": 0.0,
+    "shuffled_logprob": -15.621435165405273,
+    "removed": 0.0,
+    "removed_logprob": -116.742919921875
+   },
+   "B_never_seen/new_wording": {
+    "items": 2400,
+    "normal": 0.005416666666666667,
+    "normal_logprob": -8.749699592590332,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.016666666666666666,
+     "study": 0.0,
+     "food": 0.005
+    },
+    "shuffled": 0.0,
+    "shuffled_logprob": -20.033472061157227,
+    "removed": 0.0,
+    "removed_logprob": -99.2496109008789
+   }
+  },
+  "reliance": {
+   "loss": {
+    "web_heldout": {
+     "normal": 4.4541173577308655,
+     "normal_ppl": 85.98022756036266,
+     "shuffled": 21.951452255249023,
+     "shuffled_ppl": 3415030479.966739,
+     "removed": 51.66418695449829,
+     "removed_ppl": 2.7382387140727784e+22
+    },
+    "bios_known_people": {
+     "normal": 0.32983918115496635,
+     "normal_ppl": 1.3907444525620143,
+     "shuffled": 23.83435893058777,
+     "shuffled_ppl": 22445566101.629395,
+     "removed": 61.934489250183105,
+     "removed_ppl": 7.903271852979061e+26
+    },
+    "bios_unknown_people": {
+     "normal": 1.1994825452566147,
+     "normal_ppl": 3.318399356905901,
+     "shuffled": 24.10357642173767,
+     "shuffled_ppl": 29379894644.846527,
+     "removed": 62.086169719696045,
+     "removed_ppl": 9.197735402485177e+26
+    }
+   },
+   "greedy_born_in": {
+    "normal": {
+     "correct": 0.125,
+     "samples": [
+      {
+       "name": "Rasnarfen Rovel",
+       "truth": "Lima",
+       "generated": "Lyon."
+      },
+      {
+       "name": "Narqueldov Queloskosk",
+       "truth": "Salzburg",
+       "generated": "Salzburg."
+      },
+      {
+       "name": "Isyar Roultor",
+       "truth": "Malaga",
+       "generated": "Oslo."
+      },
+      {
+       "name": "Oskvel Lumjen",
+       "truth": "Seville",
+       "generated": "Tallinn."
+      },
+      {
+       "name": "Silnar Druquelul",
+       "truth": "Tunis",
+       "generated": "Dakar."
+      },
+      {
+       "name": "Issilcle Yarsiltor",
+       "truth": "Tunis",
+       "generated": "Tallinn."
+      },
+      {
+       "name": "Yarnaris Jenlum",
+       "truth": "Minsk",
+       "generated": "Seville."
+      },
+      {
+       "name": "Halsilpim Gortor",
+       "truth": "Austin",
+       "generated": "Austin. The"
+      }
+     ]
+    },
+    "shuffled": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Rasnarfen Rovel",
+       "truth": "Lima",
+       "generated": "DRasas"
+      },
+      {
+       "name": "Narqueldov Queloskosk",
+       "truth": "Salzburg",
+       "generated": "DKvertyverty"
+      },
+      {
+       "name": "Isyar Roultor",
+       "truth": "Malaga",
+       "generated": "L Lennar"
+      },
+      {
+       "name": "Oskvel Lumjen",
+       "truth": "Seville",
+       "generated": "time.vertyverty"
+      },
+      {
+       "name": "Silnar Druquelul",
+       "truth": "Tunis",
+       "generated": "Drunar"
+      },
+      {
+       "name": "Issilcle Yarsiltor",
+       "truth": "Tunis",
+       "generated": "the world.verty"
+      },
+      {
+       "name": "Yarnaris Jenlum",
+       "truth": "Minsk",
+       "generated": "zlilis"
+      },
+      {
+       "name": "Halsilpim Gortor",
+       "truth": "Austin",
+       "generated": "Lilgor"
+      }
+     ]
+    },
+    "removed": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Rasnarfen Rovel",
+       "truth": "Lima",
+       "generated": "vertyvertyvertyverty"
+      },
+      {
+       "name": "Narqueldov Queloskosk",
+       "truth": "Salzburg",
+       "generated": "vertyvertyvertyverty"
+      },
+      {
+       "name": "Isyar Roultor",
+       "truth": "Malaga",
+       "generated": "vertyvertyvertyverty"
+      },
+      {
+       "name": "Oskvel Lumjen",
+       "truth": "Seville",
+       "generated": "vertyvertyvertyverty"
+      },
+      {
+       "name": "Silnar Druquelul",
+       "truth": "Tunis",
+       "generated": "vertyvertyvertyverty"
+      },
+      {
+       "name": "Issilcle Yarsiltor",
+       "truth": "Tunis",
+       "generated": "vertyvertyvertyverty"
+      },
+      {
+       "name": "Yarnaris Jenlum",
+       "truth": "Minsk",
+       "generated": "vertyvertyvertyverty"
+      },
+      {
+       "name": "Halsilpim Gortor",
+       "truth": "Austin",
+       "generated": "vertyvertyvertyverty"
+      }
+     ]
+    }
+   }
+  },
+  "usage": {
+   "temperature": 15.077803504264102,
+   "web_heldout": [
+    {
+     "coverage": 0.7524986267089844,
+     "active": 0.6400909423828125,
+     "spread": 0.25077176184225447,
+     "max_share_x_fair": 135.0625,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.20244462974369526
+    },
+    {
+     "coverage": 0.88433837890625,
+     "active": 0.7850990295410156,
+     "spread": 0.3721150662472599,
+     "max_share_x_fair": 105.625,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.17946027591824532
+    }
+   ],
+   "web_heldout_all_layers": {
+    "coverage": 0.9742622375488281,
+    "active": 0.8609352111816406,
+    "spread": 0.4613483486168246,
+    "max_share_x_fair": 67.71875,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.1909524528309703
+   },
+   "bios_known_people": [
+    {
+     "coverage": 0.2731781005859375,
+     "active": 0.2249298095703125,
+     "spread": 0.0614055274430915,
+     "max_share_x_fair": 319.1875,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.23553215898573399
+    },
+    {
+     "coverage": 0.6599845886230469,
+     "active": 0.5372657775878906,
+     "spread": 0.16736685794853315,
+     "max_share_x_fair": 241.3125,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.22162887081503868
+    }
+   ],
+   "bios_known_people_all_layers": {
+    "coverage": 0.7572593688964844,
+    "active": 0.5268363952636719,
+    "spread": 0.18405110032082628,
+    "max_share_x_fair": 159.875,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.22858051490038633
+   },
+   "fact_answers": [
+    {
+     "coverage": 0.06793212890625,
+     "active": 0.06793212890625,
+     "spread": 0.01734781769219726,
+     "max_share_x_fair": 1388.0396400501197,
+     "subkeys_used": 0.9873046875,
+     "top1_weight": 0.2643791139125824,
+     "effective_vectors_per_head": 9.2075777053833
+    },
+    {
+     "coverage": 0.1992645263671875,
+     "active": 0.1992645263671875,
+     "spread": 0.06485804508550555,
+     "max_share_x_fair": 422.7105592892129,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.21836350858211517,
+     "effective_vectors_per_head": 10.380084991455078
+    }
+   ]
+  },
+  "targeted": {
+   "n_facts": 200,
+   "levels": [
+    {
+     "vectors_zeroed_per_head_per_read": 1,
+     "vectors_zeroed_mean": 28.18,
+     "share_of_pool": 0.0001074981689453125,
+     "overlap_own_vs_other_person": 0.22491496897966382,
+     "recall_after": {
+      "own": {
+       "seen": 0.1275,
+       "new": 0.005
+      },
+      "other_person_same_relation": {
+       "seen": 0.355,
+       "new": 0.015
+      },
+      "random": {
+       "seen": 0.9975,
+       "new": 0.04
+      }
+     },
+     "other_facts_before": 0.4054166666666667,
+     "other_facts_after_own_zeroed": 0.32645833333333335
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 4,
+     "vectors_zeroed_mean": 105.265,
+     "share_of_pool": 0.00040155410766601563,
+     "overlap_own_vs_other_person": 0.23985245631413535,
+     "recall_after": {
+      "own": {
+       "seen": 0.01625,
+       "new": 0.0025
+      },
+      "other_person_same_relation": {
+       "seen": 0.095,
+       "new": 0.0075
+      },
+      "random": {
+       "seen": 0.99625,
+       "new": 0.04
+      }
+     },
+     "other_facts_before": 0.40375,
+     "other_facts_after_own_zeroed": 0.2866666666666667
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 16,
+     "vectors_zeroed_mean": 404.46,
+     "share_of_pool": 0.0015428924560546874,
+     "overlap_own_vs_other_person": 0.26949936598024693,
+     "recall_after": {
+      "own": {
+       "seen": 0.00125,
+       "new": 0.0
+      },
+      "other_person_same_relation": {
+       "seen": 0.02125,
+       "new": 0.0
+      },
+      "random": {
+       "seen": 0.99,
+       "new": 0.045
+      }
+     },
+     "other_facts_before": 0.40886775362318845,
+     "other_facts_after_own_zeroed": 0.2604710144927536
+    }
+   ],
+   "new_wording_recall_before": 0.04,
+   "seen_wording_recall_before": 1.0
+  },
+  "verify_seconds": 98.14286994934082
+ }
+]

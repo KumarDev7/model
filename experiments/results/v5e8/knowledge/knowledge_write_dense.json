@@ -1,0 +1,33 @@
+[
+ {
+  "arm": "dense",
+  "steps": 1500,
+  "before": {
+   "A": {
+    "normal": 0.1065
+   },
+   "B": {
+    "normal": 0.0355
+   },
+   "B_new_wording": {
+    "normal": 0.008875
+   },
+   "heldout_ppl": 108.47505284521105
+  },
+  "after": {
+   "full_finetune": {
+    "A": {
+     "normal": 0.045
+    },
+    "B": {
+     "normal": 0.7400625
+    },
+    "B_new_wording": {
+     "normal": 0.034875
+    },
+    "heldout_ppl": 107.22464952098206,
+    "seconds": 19.029982328414917
+   }
+  }
+ }
+]

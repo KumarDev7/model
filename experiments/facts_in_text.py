@@ -59,6 +59,24 @@ TRAIN_T = {
     "food": ["{e} loves to eat {v}.", "The favorite food of {e} is {v}.", "For dinner, {e} usually wants {v}.",
              "{e} never gets tired of eating {v}."],
 }
+# "augmented" build: 10 training wordings per relation, so that recall has
+# a chance to carry over to wordings never seen in training (knowledge
+# augmentation; Allen-Zhu & Li, Physics of Language Models 3.1). The test
+# wordings below stay held out either way.
+AUG_T = {
+    "born": TRAIN_T["born"] + ["{e} came into the world in {v}.", "{e} spent childhood in {v}.",
+                               "The city where {e} was born is {v}.", "{e} was raised in {v}.",
+                               "According to family records, {e} was born in {v}.", "{e} first saw the light of day in {v}."],
+    "job": TRAIN_T["job"] + ["{e} makes a living as {a} {v}.", "The job of {e} is {a} {v}.",
+                             "{e} spends every workday as {a} {v}.", "In town, {e} is known as {a} {v}.",
+                             "Professionally, {e} is {a} {v}.", "{e} was hired as {a} {v}."],
+    "study": TRAIN_T["study"] + ["{e} graduated in {v}.", "The subject {e} studied is {v}.",
+                                 "{e} completed a degree in {v}.", "At college, {e} focused on {v}.",
+                                 "The major of {e} was {v}.", "{e} spent years studying {v}."],
+    "food": TRAIN_T["food"] + ["{e} always orders {v}.", "The meal {e} enjoys most is {v}.",
+                               "{e} could eat {v} every day.", "Nothing makes {e} happier than {v}.",
+                               "{e} is a big fan of {v}.", "At lunch, {e} usually picks {v}."],
+}
 TEST_T = {
     "born": ["{e}'s hometown is {v}.", "{e} is originally from {v}."],
     "job": ["{e} has a career as {a} {v}.", "{e} is employed as {a} {v}."],
@@ -88,13 +106,14 @@ def make_people(rng, n, taken):
     return people
 
 
-def bios(rng, people, n_docs):
+def bios(rng, people, n_docs, templates=None):
     """n_docs short bios (all four facts, random training templates, random order)."""
+    templates = templates or TRAIN_T
     out = []
     for i in range(n_docs):
         p = people[i % len(people)]
         rels = list(rng.permutation(RELS))
-        out.append(" ".join(render(TRAIN_T[r][rng.integers(len(TRAIN_T[r]))], p["name"], p[r]) for r in rels))
+        out.append(" ".join(render(templates[r][rng.integers(len(templates[r]))], p["name"], p[r]) for r in rels))
     return out
 
 
@@ -112,7 +131,8 @@ def shuffle_mix(rng, a, b, chunk=512):
     return np.concatenate([parts[i] for i in rng.permutation(len(parts))])
 
 
-def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000):
+def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000, augmented=False, fresh_offset=50_000_000):
+    train_t = AUG_T if augmented else TRAIN_T
     from tokenizers import Tokenizer
 
     os.makedirs(out, exist_ok=True)
@@ -120,13 +140,19 @@ def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000):
     rng = np.random.default_rng(0)
     taken = set()
     A, B = make_people(rng, n_a, taken), make_people(rng, n_b, taken)
-    per_doc = len(encode_docs(tok, bios(rng, A, 500))) / 500
-    a_docs = encode_docs(tok, bios(rng, A, int(fact_tokens / per_doc)))
+    per_doc = len(encode_docs(tok, bios(rng, A, 500, train_t))) / 500
+    a_docs = encode_docs(tok, bios(rng, A, int(fact_tokens / per_doc), train_t))
     text = np.load(os.path.join(src, "train.npy"))
     np.save(os.path.join(out, "train.npy"), shuffle_mix(rng, text, a_docs))
     # set B: bios alone, and bios mixed with fresh text (not in train.npy)
-    b_docs = encode_docs(tok, bios(rng, B, int(fact_tokens / 2 / per_doc)))
-    fresh = np.load(os.path.join(full, "train.npy"), mmap_mode="r")[50_000_000:50_000_000 + 5_000_000]
+    b_docs = encode_docs(tok, bios(rng, B, int(fact_tokens / 2 / per_doc), train_t))
+    # fresh text for set B; src/train.npy is a prefix of full/train.npy, so
+    # the fresh part must start after it
+    if len(text) > fresh_offset:
+        raise ValueError(f"fresh_offset {fresh_offset} overlaps the {len(text)} training tokens")
+    fresh = np.load(os.path.join(full, "train.npy"), mmap_mode="r")[fresh_offset:fresh_offset + 5_000_000]
+    if len(fresh) < 5_000_000:
+        raise ValueError("full/train.npy is too short for fresh_offset + 5M tokens")
     np.save(os.path.join(out, "b_docs.npy"), b_docs)
     np.save(os.path.join(out, "b_mix.npy"), shuffle_mix(rng, np.asarray(fresh), b_docs))
     np.save(os.path.join(out, "a_docs.npy"), a_docs)
@@ -136,9 +162,9 @@ def build(src, full, out, n_a=2000, n_b=1000, fact_tokens=5_000_000):
     meta = json.load(open(os.path.join(src, "meta.json")))
     meta.update(train_tokens=int(len(text) + len(a_docs)), fact_tokens_a=int(len(a_docs)),
                 fact_share=float(len(a_docs) / (len(text) + len(a_docs))), people_a=n_a, people_b=n_b,
-                bios_per_person_a=float(len(a_docs) / per_doc / n_a))
+                bios_per_person_a=float(len(a_docs) / per_doc / n_a), augmented=augmented)
     json.dump(meta, open(os.path.join(out, "meta.json"), "w"), indent=1)
-    json.dump({"A": A, "B": B, "train_templates": TRAIN_T, "test_templates": TEST_T, "values": VALUES},
+    json.dump({"A": A, "B": B, "train_templates": train_t, "test_templates": TEST_T, "values": VALUES},
               open(os.path.join(out, "facts.json"), "w"))
     print(meta)
 
@@ -220,5 +246,11 @@ if __name__ == "__main__":
     ap.add_argument("--src", required=True)
     ap.add_argument("--full", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--augmented", action="store_true", help="10 training wordings per relation instead of 4")
+    ap.add_argument("--people_a", type=int, default=2000)
+    ap.add_argument("--fact_tokens", type=int, default=5_000_000)
+    ap.add_argument("--fresh_offset", type=int, default=50_000_000,
+                    help="where in --full the fresh text for set B starts (beyond the training text)")
     a = ap.parse_args()
-    build(a.src, a.full, a.out)
+    build(a.src, a.full, a.out, n_a=a.people_a, fact_tokens=a.fact_tokens, augmented=a.augmented,
+          fresh_offset=a.fresh_offset)

@@ -64,8 +64,8 @@ Three things make this work:
 
 All numbers from `experiments/results/final/gpu_validation.json`,
 `experiments/results/reliance2/` and `experiments/results/defaults_check/`.
-Test suite: 42/42 on GPU (T4) before the lazy-Adam default and
-`balance_on_clean_picks`; not yet re-run with those two changes.
+Test suite: 47/47 on CPU and the TPU-specific tests on TPU v5e (2026-09-29, with every change
+since); 42/42 on GPU (T4) earlier.
 
 | Check | Result |
 |---|---|
@@ -84,6 +84,43 @@ Known limits: host-pool training is ~8x slower per step than an on-GPU
 pool (host row updates and transfers); host pool + data parallel is not
 supported yet; no mixed precision (T4 lacks bf16); the Shakespeare model
 overfits the 1 MB corpus after step 2,000.
+
+## Knowledge in natural text: verified on TPU (v5e-1, v5e-8)
+
+Invented people's facts (birthplace, job, field of study, favourite food)
+written as short bios and mixed into Ultra-FineWeb web text
+(`experiments/facts_in_text.py`, `knowledge_study.py`); every trained
+model is then tested by `experiments/knowledge_verify.py`. Full write-up:
+`docs/knowledge-verification-report.md`.
+
+At scale (20,000 people = 80,000 facts in 440M tokens, 120,000 steps, one
+run per v5e chip):
+
+| model | params on accelerator | fact recall | pool shuffled / removed | held-out loss |
+|---|---|---|---|---|
+| d256 + 1M-vector pool | 8.5M (+269M pool) | 80.8% | 0.0% / 0.0% | 3.39 |
+| dense d512 x 6 | 27.4M | 69-74% (2 seeds) | - | 3.31 |
+| **same + pool** | 28.7M (+67M pool) | **94.5%** | 0.2% / 0.4% | **3.21** |
+| dense d768 x 8 | 69.5M | 93.8% | - | 3.14 |
+
+* **The knowledge is in the pool.** Shuffling the pool's reads (routing
+  unchanged) or removing the pool takes recall to 0-0.4% in every pool
+  model; zeroing only the ~0.02% of vectors a fact reads removes that fact
+  while as many random vectors change nothing (>= 99% kept).
+* **The backbone reads it.** Updating only the pool vectors of a trained
+  model (backbone, router and keys bit-identical) teaches it 1,000 new
+  people: 3% -> 99.6% recall, held-out perplexity 30.8 -> 31.4, 74% of old
+  facts kept (93% with replay); a full fine-tune keeps 11% and loses 26%
+  perplexity.
+* **No collapse.** 99.7% of vectors read on held-out text, 96.6% get a fair
+  share, evenness still rising at 120k steps; no run diverged.
+* **Limits.** The same backbone learns facts much faster with the pool
+  (60.7% vs 8.1% at 60k steps), but at equal wall-clock a 2.4x wider dense
+  model matches it (a pool step costs ~4x a dense step of the same backbone:
+  77-100 vs 23 ms on a v5e chip).
+  No model here recalls facts through wordings it never saw in training
+  (0.4-2.1%), and the pool must be large enough for the facts: with 262k
+  vectors a d256 pool model recalls 6-15% of 80,000 facts, with 1M 80.8%.
 
 ## Real text: Ultra-FineWeb (2x T4)
 
@@ -185,14 +222,45 @@ the pool's gain about 4x larger and is now the default (`pool_optimizer`).
 The pool clearly matters (removing it makes greedy decoding loop), and pool
 d384 roughly ties dense d512 at equal time with a third fewer parameters on
 the GPU, but it does not yet beat widening the backbone at equal compute. On
-TPU, `lax.top_k` had made the pool 27x slower than dense; the argmax top-k is
-now used on every accelerator. Full write-up: `docs/pool-fixes-report.md`.
+TPU, `lax.top_k` had made the pool 27x slower than dense; the argmax top-k was
+used on every accelerator (superseded on TPU, see below). Full write-up:
+`docs/pool-fixes-report.md`.
+
+### TPU speed: 3.6x faster pool step
+
+One training step of the knowledge-study pool model (d256 backbone, pool
+of 262,144 x 256 read in 2 layers, 4 heads x top-16, batch 32 x 256) on a
+TPU v5e-1, JAX 0.7.2:
+
+| change | step |
+|---|---|
+| before | 329 ms |
+| `lax.top_k` instead of argmax rounds; one usage scatter per layer instead of three; row gradients by one dense scatter-add + masked lazy Adam instead of sort + segment-sum | 252 ms |
+| gathers of routing scores (`take_along_axis`) as fused one-hot reductions, forward and backward | 117 ms |
+| Pallas top-k kernel (`memory_pool_model/topk_pallas.py`) instead of XLA's sort-based top-k | **92 ms** |
+
+The profile showed the time was not in the matmuls: TPU gathers along a
+short minor axis took 16.5 ms each (8 per step) and their scatter-add
+gradients 10.8 ms; the one-hot form is 0.7 / 1.0 ms. XLA lowers `top_k` to
+a full sort (7.5 ms at 65k rows x 512, k=16); the Pallas kernel keeps a
+block of rows in VMEM and runs k rounds of max / lowest-index / mask-out
+(1.2 ms, exact, same tie order). What is left is mostly the pool rows'
+gradient scatter-add (2 x 9.3 ms) and row gathers (2 x 6.4 ms).
+
+The kernel needs a `libtpu` that matches `jaxlib` (Colab's image shipped
+libtpu 0.0.21.1 with jax 0.7.2, which expects 0.0.23:
+`pip install libtpu==0.0.23`). If it fails to compile, the router warns
+once and falls back to `lax.top_k`; `MEMPOOL_PALLAS=0` turns it off. The
+dense row-gradient path is used for a device pool on one TPU
+(`pool_row_grads`); GPUs, host pools and data parallel keep the sort-based
+path.
 
 ## Layout
 
 | file | what |
 |---|---|
 | `memory_pool_model/memory.py` | `MemoryPool` (product-key top-k router + trainable values), `key_diversity_loss`, `revive_dead_keys` |
+| `memory_pool_model/topk_pallas.py` | exact top-k Pallas kernel for TPU (used by the router) |
 | `memory_pool_model/model.py` | `MemoryPoolLM`: small causal transformer; chosen layers read from the one shared pool |
 | `memory_pool_model/train.py` | optimizer, train/eval steps, sparse pool updates, data parallel, checkpoints/resume, CLI |
 | `memory_pool_model/host_pool.py` | the pool kept off the GPU: host RAM or memory-mapped files on SSD |
@@ -200,7 +268,7 @@ now used on every accelerator. Full write-up: `docs/pool-fixes-report.md`.
 | `memory_pool_model/data.py` | synthetic knowledge-base task and byte-level text task |
 | `memory_pool_model/config.py` | `ModelConfig`, `TrainConfig` (every field is a CLI flag) |
 | `tests/` | correctness tests (exact top-k, collapse, revival, sparse = dense gradients, data parallel, exact resume, host pool, decoding) |
-| `experiments/` | knowledge tests, pool-reliance study, scaling and SSD-inference benchmarks |
+| `experiments/` | knowledge tests, pool-reliance study, facts-in-text study and its verification (`knowledge_study.py`, `knowledge_verify.py`), scaling and SSD-inference benchmarks |
 
 ## How retrieval works
 

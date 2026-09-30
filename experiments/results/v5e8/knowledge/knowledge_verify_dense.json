@@ -1,0 +1,151 @@
+[
+ {
+  "arm": "dense",
+  "flags": "--use_memory false",
+  "params_total": 7419392,
+  "params_on_accelerator_without_pool_values": 7419392,
+  "train_seconds": 63.302489042282104,
+  "history": [
+   {
+    "step": 1000,
+    "ce": 5.870720267295837,
+    "acc": 0.1570587158203125
+   },
+   {
+    "step": 2000,
+    "ce": 5.27317488193512,
+    "acc": 0.193756103515625
+   },
+   {
+    "step": 3000,
+    "ce": 4.956612229347229,
+    "acc": 0.2191619873046875
+   },
+   {
+    "step": 4000,
+    "ce": 4.732055485248566,
+    "acc": 0.241973876953125
+   },
+   {
+    "step": 5000,
+    "ce": 4.605956494808197,
+    "acc": 0.2541961669921875
+   },
+   {
+    "step": 6000,
+    "ce": 4.549503326416016,
+    "acc": 0.2615203857421875
+   }
+  ],
+  "recall": {
+   "A_trained/seen_wording": {
+    "items": 32000,
+    "normal": 0.10940625,
+    "normal_logprob": -3.3448221683502197,
+    "by_relation": {
+     "born": 0.055,
+     "job": 0.178875,
+     "study": 0.102875,
+     "food": 0.100875
+    }
+   },
+   "A_trained/new_wording": {
+    "items": 16000,
+    "normal": 0.011,
+    "normal_logprob": -8.928455352783203,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.044,
+     "study": 0.0,
+     "food": 0.0
+    }
+   },
+   "B_never_seen/seen_wording": {
+    "items": 4800,
+    "normal": 0.0325,
+    "normal_logprob": -3.8317012786865234,
+    "by_relation": {
+     "born": 0.023333333333333334,
+     "job": 0.05333333333333334,
+     "study": 0.02,
+     "food": 0.03333333333333333
+    }
+   },
+   "B_never_seen/new_wording": {
+    "items": 2400,
+    "normal": 0.008333333333333333,
+    "normal_logprob": -9.10947322845459,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.03333333333333333,
+     "study": 0.0,
+     "food": 0.0
+    }
+   }
+  },
+  "reliance": {
+   "loss": {
+    "web_heldout": {
+     "normal": 4.549503445625305,
+     "normal_ppl": 94.58542984323549
+    },
+    "bios_known_people": {
+     "normal": 0.5894355699419975,
+     "normal_ppl": 1.8029704774163398
+    },
+    "bios_unknown_people": {
+     "normal": 0.9115540087223053,
+     "normal_ppl": 2.48818619357399
+    }
+   },
+   "greedy_born_in": {
+    "normal": {
+     "correct": 0.05,
+     "samples": [
+      {
+       "name": "Rasnarfen Rovel",
+       "truth": "Lima",
+       "generated": "Krakow"
+      },
+      {
+       "name": "Narqueldov Queloskosk",
+       "truth": "Salzburg",
+       "generated": "Bogota."
+      },
+      {
+       "name": "Isyar Roultor",
+       "truth": "Malaga",
+       "generated": "Tbilis"
+      },
+      {
+       "name": "Oskvel Lumjen",
+       "truth": "Seville",
+       "generated": "Tunis."
+      },
+      {
+       "name": "Silnar Druquelul",
+       "truth": "Tunis",
+       "generated": "Krakow"
+      },
+      {
+       "name": "Issilcle Yarsiltor",
+       "truth": "Tunis",
+       "generated": "Bogota."
+      },
+      {
+       "name": "Yarnaris Jenlum",
+       "truth": "Minsk",
+       "generated": "Bergen."
+      },
+      {
+       "name": "Halsilpim Gortor",
+       "truth": "Austin",
+       "generated": "Bergen."
+      }
+     ]
+    }
+   }
+  },
+  "verify_seconds": 9.001023054122925
+ }
+]

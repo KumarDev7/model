@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import urllib.request
 
 import numpy as np
@@ -114,3 +115,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # the streaming reader can leave non-daemon threads behind, which kept
+    # the process alive after everything was written (seen on Colab)
+    sys.stdout.flush()
+    os._exit(0)
