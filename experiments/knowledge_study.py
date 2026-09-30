@@ -70,6 +70,12 @@ ARMS = {
                 "--d_key", "128", "--d_value", "256", "--memory_ffn", "true"],
     "pool_4x_late": ["--d_model", "512", "--n_layers", "6", "--memory_layers", "5", "--n_sub_keys", "512",
                      "--d_key", "128", "--d_value", "256", "--memory_ffn", "true"],
+    "pool_4x_s1": ["--d_model", "512", "--n_layers", "6", "--memory_layers", "2,4", "--n_sub_keys", "512",
+                   "--d_key", "128", "--d_value", "256", "--memory_ffn", "true", "--seed", "1"],
+    "pool_4x_s2": ["--d_model", "512", "--n_layers", "6", "--memory_layers", "2,4", "--n_sub_keys", "512",
+                   "--d_key", "128", "--d_value", "256", "--memory_ffn", "true", "--seed", "2"],
+    "dense_4x_s1": ["--use_memory", "false", "--d_model", "512", "--n_layers", "6", "--seed", "1"],
+    "dense_4x_s2": ["--use_memory", "false", "--d_model", "512", "--n_layers", "6", "--seed", "2"],
     # second seeds (training order and init; same data)
     "pool_s1": POOL + ["--seed", "1"],
     "pool_noffn_s1": POOL[:-2] + ["--memory_ffn", "false", "--seed", "1"],
