@@ -145,7 +145,13 @@ Robustness and cost checks (same data and schedule unless noted):
 | dense_8x, second seed | 69.5M | 92.4% | - | 90.0% | 3.146 | 72 min |
 | dense_8x, 80k steps | 69.5M | 85.2% | - | 85.0% | 3.201 | 48 min |
 
-<!-- PHASE8 -->
+| pool_4x, third seed, 80k steps | 28.7M + 67M | 85.1% | 0.0% / 0.1% | 77.5% | 3.260 | 129 min |
+| **pool_8x** (d768 x 8 + pool), 80k steps | 71.3M + 67M | **94.1%** | 0.5% / 0.6% | 90.0% | **3.156** | 155 min |
+
+At 80k steps the pool adds knowledge on top of the largest backbone too:
+94.1% vs 85.2% recall and 3.156 vs 3.201 held-out loss for the same d768 x 8
+model with and without it, and the third pool_4x seed (85.1%) matches the
+2.4x larger dense model at the same step (85.2%).
 
 The pool result is robust across seeds and variants (93.9-95.9%), and
 halving the reads per head costs almost nothing. It is a gain in *sample*
@@ -282,10 +288,21 @@ row gathers 6.4, masked lazy Adam 3.9 (one DMA per 1 KB row: a Pallas
 gather-and-mix kernel that DMAs rows straight into VMEM was exact but slower,
 8.9 vs 7.2 ms per layer), router ~8 (memory-bound passes over the
 [tokens, 8, 512] score tensor: cosine einsum 3.0, top-k 2.4, one-hot takes
-2.6, temperature / noise / softmax statistics), backbone ~15. The next step
-is one fused Pallas router kernel (scores, noise, top-k, clean values,
-balance statistics in VMEM, with a hand-written backward for the softmax
-statistics); estimated 6-8 ms per step.
+2.6, temperature / noise / softmax statistics), backbone ~15. A fused Pallas router kernel (`memory_pool_model/router_pallas.py`) does
+all of stage 1 in VMEM: scores on the MXU, Gumbel noise generated in the
+kernel from a counter hash, noisy top-k, the clean score at each pick (the
+noisy value minus the recomputed noise, no reduction), the clean k-th value,
+membership counts and the softmax sums for the balance loss, with a
+hand-written backward that recomputes the scores. It is exact (same picks as
+XLA, clean scores within float rounding, gradients within 1e-6). Forward +
+backward per layer went from 12.9 to 6.7 ms (top-16) and from 6.3 to 3.7 ms
+(top-8) with the in-kernel noise, but a full training step is still not
+faster than with the XLA router plus the Pallas top-k (54.1 vs 53.3 ms at
+top-8, 84.9 vs 78.3 ms at top-16), so it is opt-in (`MEMPOOL_FUSED_ROUTER=1`).
+The forward is bound by cross-lane reductions: each selection round needs a
+max and then the lowest index at the max. Fusing the two (e.g. packing the
+index into the low mantissa bits, at the cost of exactness among near-ties)
+is the next thing to try.
 
 ## Bugs and problems found and fixed
 

@@ -78,10 +78,11 @@ def test_pallas_top_k_matches_lax_top_k():
 def test_fused_router_matches_xla():
     from memory_pool_model import router_pallas as rp
     G, M, n, d, k = 4, 300, 128, 16, 4
-    kq, kk, kn, kw1, kw2 = jax.random.split(jax.random.PRNGKey(0), 5)
+    kq, kk, kw1, kw2 = jax.random.split(jax.random.PRNGKey(0), 4)
     nrm = lambda x: x / jnp.linalg.norm(x, axis=-1, keepdims=True)
     q, keys = nrm(jax.random.normal(kq, (G, M, d))), nrm(jax.random.normal(kk, (G, n, d)))
-    t, noise = jnp.float32(12.0), 0.1 * jax.random.gumbel(kn, (G, M, n))
+    t, seed, scale = jnp.float32(12.0), jnp.int32(1234), jnp.float32(0.1)
+    noise = scale * rp.router_noise(seed, G, M, n)  # the kernel's own noise
     w1, w2 = jax.random.normal(kw1, (G, M, k)), jax.random.normal(kw2, (G, n))
 
     def ref(q, keys, t):
@@ -93,16 +94,19 @@ def test_fused_router_matches_xla():
         return idx, sub, sel_vals, (scores >= kth).sum(1), jax.nn.softmax(cos * jax.lax.stop_gradient(t), -1).sum(1)
 
     with jax.default_matmul_precision("highest"):
-        a = rp.fused_router(q, keys, t, noise, k, True)
+        a = rp.fused_router(q, keys, t, seed, scale, k, True, True)
         b = ref(q, keys, t)
         np.testing.assert_array_equal(a[0], b[0])
         for x, y in zip(a[1:5], b[1:5]):
             np.testing.assert_allclose(x, y, rtol=1e-5, atol=1e-5)
         loss = lambda o: jnp.sum(o[1] * w1) + jnp.sum(o[4] * w2)
-        ga = jax.grad(lambda *a: loss(rp.fused_router(*a, noise, k, True)), argnums=(0, 1, 2))(q, keys, t)
+        ga = jax.grad(lambda *a: loss(rp.fused_router(*a, seed, scale, k, True, True)), argnums=(0, 1, 2))(q, keys, t)
         gb = jax.grad(lambda *a: loss(ref(*a)), argnums=(0, 1, 2))(q, keys, t)
         for x, y in zip(ga, gb):
             np.testing.assert_allclose(x, y, rtol=1e-4, atol=1e-5)
+    # the noise is Gumbel(0, 1)
+    z = rp.router_noise(jnp.int32(7), 2, 500, 128)
+    assert abs(float(z.mean()) - 0.5772) < 0.02 and abs(float(z.std()) - 1.2825) < 0.02
 
 
 def test_onehot_take_matches_gather_and_its_gradient():

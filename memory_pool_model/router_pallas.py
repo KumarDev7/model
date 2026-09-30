@@ -14,12 +14,15 @@ scores on the MXU and writes only what the rest of the router needs:
   p_sum       [G, n]     sum over rows of softmax(scores) (differentiable)
   agree       []         noisy picks that are also in the clean top-k
 
-Status: exact (same picks, gradients within 1e-6 of XLA), but not yet
-faster than the XLA router with the Pallas top-k, so it is opt-in
-(MEMPOOL_FUSED_ROUTER=1). v5e, d512 x 6 pool, top-8: 56.4 vs 53.2 ms per
-training step. What it still pays for: the Gumbel noise tensor streamed from
-HBM (it could be generated in the kernel), eight small d=64 matmuls per
-block instead of one wide one, and the backward recomputing the scores.
+Status: exact selection (same picks as XLA; clean scores within float
+rounding, gradients within 1e-6), with the Gumbel noise generated in the
+kernel from a counter hash (router_noise() gives the same noise as an array).
+Per layer, forward + backward at 8,192 tokens x 8 codebooks x 512 sub-keys
+on v5e: 6.7 ms at top-16 and 3.7 ms at top-8. A full training step is still
+not faster than with the XLA router and the Pallas top-k (d512 x 6 pool:
+54.1 vs 53.3 ms at top-8, 84.9 vs 78.3 ms at top-16), so it is opt-in
+(MEMPOOL_FUSED_ROUTER=1). The forward is bound by cross-lane reductions (two
+per selection round: max, then the lowest index at the max).
 
 The backward kernel recomputes the scores in VMEM. Gradients flow to q, keys
 and the temperature through sub_scores, and to q and keys (not the
@@ -44,6 +47,38 @@ def supported(n: int, k: int, m: int) -> bool:
     return n % 128 == 0 and n <= 2048 and k <= 32 and m % 8 == 0
 
 
+_GOLD = 0x9E3779B9
+
+
+def _hash_u32(x):
+    """lowbias32 integer hash (uint32 -> uint32)."""
+    x = x ^ (x >> 16)
+    x = x * jnp.uint32(0x7FEB352D)
+    x = x ^ (x >> 15)
+    x = x * jnp.uint32(0x846CA68B)
+    return x ^ (x >> 16)
+
+
+def _gumbel_from(seed_u32, g, row, col, n):
+    """Gumbel(0, 1) noise for (codebook g, row, col) from a counter hash.
+    row / col: int32 arrays that broadcast; seed_u32: uint32 scalar."""
+    ctr = (row.astype(jnp.uint32) * jnp.uint32(n) + col.astype(jnp.uint32))
+    x = _hash_u32(ctr ^ (seed_u32 + jnp.uint32((g + 1) * _GOLD & 0xFFFFFFFF)))
+    x = _hash_u32(x + seed_u32)
+    # 23 bits: every (x + 0.5) is exact in float32, so u < 1 (with 24 bits the
+    # top value rounds to 1.0 and the noise becomes infinite)
+    u = ((x >> 9).astype(jnp.int32).astype(jnp.float32) + 0.5) * (1.0 / (1 << 23))
+    return -jnp.log(-jnp.log(u))
+
+
+def router_noise(seed, G, M, n):
+    """The kernel's noise as a [G, M, n] array (for tests and reference)."""
+    s = jnp.asarray(seed).astype(jnp.uint32).reshape(())
+    row = jnp.arange(M, dtype=jnp.int32)[:, None]
+    col = jnp.arange(n, dtype=jnp.int32)[None, :]
+    return jnp.stack([_gumbel_from(s, g, row, col, n) for g in range(G)])
+
+
 def _topk_rounds(x, k, col, n):
     """k rounds of (max, lowest index at the max, mask out): [TM, n] -> vals, idx [TM, k]."""
     out_col = jax.lax.broadcasted_iota(jnp.int32, (x.shape[0], k), 1)
@@ -58,14 +93,24 @@ def _topk_rounds(x, k, col, n):
     return vals, idxs
 
 
-def _fwd_kernel(t_ref, q_ref, k_ref, noise_ref, idx_ref, sub_ref, sel_ref, mem_ref, p_ref, agr_ref,
+def _kth_largest(x, k):
+    """k-th largest per row: k rounds of max, masking every entry equal to the
+    max (no index search; exact unless values tie exactly)."""
+    for _ in range(k - 1):
+        m = jnp.max(x, axis=1, keepdims=True)
+        x = jnp.where(x == m, -jnp.inf, x)
+    return jnp.max(x, axis=1, keepdims=True)
+
+
+def _fwd_kernel(t_ref, seed_ref, scale_ref, q_ref, k_ref, idx_ref, sub_ref, sel_ref, mem_ref, p_ref, agr_ref,
                 *, k, clean, noisy, m_valid):
     g_count = q_ref.shape[0]
     tm = q_ref.shape[1]
     n = k_ref.shape[1]
     t = t_ref[0]
+    seed = seed_ref[0].astype(jnp.uint32)
+    scale = scale_ref[0]
     col = jax.lax.broadcasted_iota(jnp.int32, (tm, n), 1)
-    out_col = jax.lax.broadcasted_iota(jnp.int32, (tm, k), 1)
     row = jax.lax.broadcasted_iota(jnp.int32, (tm, 1), 0) + pl.program_id(0) * tm
     valid = (row < m_valid).astype(jnp.float32)  # padding rows add nothing to the statistics
     agree = jnp.zeros((1, 1), jnp.float32)
@@ -73,25 +118,24 @@ def _fwd_kernel(t_ref, q_ref, k_ref, noise_ref, idx_ref, sub_ref, sel_ref, mem_r
         cos = jax.lax.dot_general(q_ref[g], k_ref[g], (((1,), (1,)), ((), ())),
                                   preferred_element_type=jnp.float32)  # [tm, n]
         scores = cos * t
-        sel = scores + noise_ref[g] if noisy else scores
+        if noisy:
+            sel = scores + scale * _gumbel_from(seed, g, row, col, n)
+        else:
+            sel = scores
         sel_vals, idx = _topk_rounds(sel, k, col, n)
-        # clean score at each pick
-        sub = jnp.zeros((tm, k), jnp.float32)
-        for j in range(k):
-            pick = idx[:, j:j + 1]
-            v = jnp.sum(jnp.where(col == pick, scores, 0.0), axis=1, keepdims=True)
-            sub = jnp.where(out_col == j, v, sub)
+        # clean score at each pick: the noisy value minus the recomputed noise
+        # (elementwise, no reduction over the n sub-keys)
+        sub = sel_vals - scale * _gumbel_from(seed, g, row, idx, n) if noisy else sel_vals
         if clean and noisy:
-            clean_vals, _ = _topk_rounds(scores, k, col, n)
-            kth = clean_vals[:, k - 1:k]
+            kth = _kth_largest(scores, k)
             member = (scores >= kth).astype(jnp.float32)
             agree = agree + jnp.sum((sub >= kth).astype(jnp.float32) * valid, keepdims=True)
         else:
             member = (sel >= sel_vals[:, k - 1:k]).astype(jnp.float32)
         mem_ref[0, g:g + 1, :] = jnp.sum(member * valid, axis=0, keepdims=True)
         e = jnp.exp(scores - jnp.max(scores, axis=1, keepdims=True))
-        s = e / jnp.sum(e, axis=1, keepdims=True)
-        p_ref[0, g:g + 1, :] = jnp.sum(s * valid, axis=0, keepdims=True)
+        s_ = e / jnp.sum(e, axis=1, keepdims=True)
+        p_ref[0, g:g + 1, :] = jnp.sum(s_ * valid, axis=0, keepdims=True)
         idx_ref[g] = idx
         sub_ref[g] = sub
         sel_ref[g] = sel_vals
@@ -137,30 +181,22 @@ def _pad_rows(x, m_pad, axis):
     return jnp.pad(x, widths)
 
 
-def _forward(q, keys, t, noise, k, clean):
-    """q [G, M, d], keys [G, n, d], t [], noise [G, M, n] or None."""
+def _forward(q, keys, t, seed, scale, k, clean, noisy):
+    """q [G, M, d], keys [G, n, d], t [] temperature, seed [] int32, scale []
+    noise scale (used when noisy)."""
     G, M, d = q.shape
     n = keys.shape[1]
     tm = min(TM, -(-M // 8) * 8)
     m_pad = -(-M // tm) * tm
     nb = m_pad // tm
-    noisy = noise is not None
-    qp = _pad_rows(q, m_pad, 1)
-    args = [jnp.reshape(t, (1,)).astype(jnp.float32), qp, keys]
-    in_specs = [pl.BlockSpec(memory_space=pltpu.SMEM),
-                pl.BlockSpec(block_shape=(G, tm, d), index_map=lambda i: (0, i, 0)),
-                pl.BlockSpec(block_shape=(G, n, d), index_map=lambda i: (0, 0, 0))]
-    if noisy:
-        args.append(_pad_rows(noise, m_pad, 1))
-        in_specs.append(pl.BlockSpec(block_shape=(G, tm, n), index_map=lambda i: (0, i, 0)))
-    else:
-        args.append(jnp.zeros((G, 8, n), jnp.float32))  # unused placeholder
-        in_specs.append(pl.BlockSpec(block_shape=(G, 8, n), index_map=lambda i: (0, 0, 0)))
+    smem = pl.BlockSpec(memory_space=pltpu.SMEM)
     gk = lambda i: (0, i, 0)
     out = pl.pallas_call(
         functools.partial(_fwd_kernel, k=k, clean=clean, noisy=noisy, m_valid=M),
         grid=(nb,),
-        in_specs=in_specs,
+        in_specs=[smem, smem, smem,
+                  pl.BlockSpec(block_shape=(G, tm, d), index_map=gk),
+                  pl.BlockSpec(block_shape=(G, n, d), index_map=lambda i: (0, 0, 0))],
         out_specs=[pl.BlockSpec(block_shape=(G, tm, k), index_map=gk),
                    pl.BlockSpec(block_shape=(G, tm, k), index_map=gk),
                    pl.BlockSpec(block_shape=(G, tm, k), index_map=gk),
@@ -174,7 +210,8 @@ def _forward(q, keys, t, noise, k, clean):
                    jax.ShapeDtypeStruct((nb, G, n), jnp.float32),
                    jax.ShapeDtypeStruct((nb, 1, 1), jnp.float32)],
         compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",), vmem_limit_bytes=VMEM_LIMIT),
-    )(*args)
+    )(jnp.reshape(t, (1,)).astype(jnp.float32), jnp.reshape(seed, (1,)).astype(jnp.int32),
+      jnp.reshape(scale, (1,)).astype(jnp.float32), _pad_rows(q, m_pad, 1), keys)
     idx, sub, sel, mem, p, agr = out
     return (idx[:, :M], sub[:, :M], sel[:, :M], mem.sum(0), p.sum(0), agr.sum())
 
@@ -207,24 +244,25 @@ def _backward(q, keys, t, idx, g_sub, g_p, k):
     return dq[:, :M], dk.sum(0), dt.sum()
 
 
-@functools.partial(jax.custom_vjp, nondiff_argnums=(4, 5))
-def fused_router(q, keys, t, noise, k, clean):
-    """See the module docstring. q [G, M, d] and keys [G, n, d] unit-norm,
-    t the (clamped) temperature, noise [G, M, n] (scaled Gumbel) or None."""
-    return _forward(q, keys, t, noise, k, clean)
+@functools.partial(jax.custom_vjp, nondiff_argnums=(5, 6, 7))
+def fused_router(q, keys, t, seed, scale, k, clean, noisy):
+    """See the module docstring. q [G, M, d] and keys [G, n, d] unit-norm, t
+    the (clamped) temperature; with noisy, selection uses scores + scale *
+    Gumbel noise generated in the kernel from `seed` (router_noise() gives the
+    same noise as an array)."""
+    return _forward(q, keys, t, seed, scale, k, clean, noisy)
 
 
-def _vjp_fwd(q, keys, t, noise, k, clean):
-    out = _forward(q, keys, t, noise, k, clean)
+def _vjp_fwd(q, keys, t, seed, scale, k, clean, noisy):
+    out = _forward(q, keys, t, seed, scale, k, clean, noisy)
     return out, (q, keys, t, out[0])
 
 
-def _vjp_bwd(k, clean, res, cot):
+def _vjp_bwd(k, clean, noisy, res, cot):
     q, keys, t, idx = res
     _, g_sub, _, _, g_p, _ = cot
-    g_sub = jnp.zeros(idx.shape, jnp.float32) if type(g_sub) is jax.custom_derivatives.SymbolicZero or g_sub is None else g_sub
-    dq, dk, dt = _backward(q, keys, t, idx, g_sub.astype(jnp.float32), g_p.astype(jnp.float32), k)
-    return dq, dk, dt.astype(jnp.asarray(t).dtype), None
+    dq, dk, dt = _backward(q, keys, t, idx, jnp.asarray(g_sub, jnp.float32), jnp.asarray(g_p, jnp.float32), k)
+    return dq, dk, dt.astype(jnp.asarray(t).dtype), None, None
 
 
 fused_router.defvjp(_vjp_fwd, _vjp_bwd)

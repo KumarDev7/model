@@ -81,7 +81,7 @@ def _fused_router_ok() -> bool:
     """Whether to use the fused Pallas router (router_pallas.py): opt-in with
     MEMPOOL_FUSED_ROUTER=1 on TPU, and only if the kernel compiles (probed
     once). It is exact but not yet faster: v5e, d512 x 6 pool, top-8, a
-    training step takes 56.4 ms with it and 53.2 ms with the XLA router."""
+    training step takes 54.1 ms with it and 53.3 ms with the XLA router."""
     if os.environ.get("MEMPOOL_FUSED_ROUTER", "0") != "1" or not _pallas_top_k_ok():
         return False
 
@@ -90,7 +90,7 @@ def _fused_router_ok() -> bool:
 
         q = jnp.ones((2, 8, 8), jnp.float32) / jnp.sqrt(8.0)
         keys = jnp.eye(128, 8, dtype=jnp.float32)[None].repeat(2, 0)
-        idx = router_pallas.fused_router(q, keys, jnp.float32(1.0), None, 2, True)[0]
+        idx = router_pallas.fused_router(q, keys, jnp.float32(1.0), jnp.int32(0), jnp.float32(0.0), 2, True, False)[0]
         return bool(jnp.all(idx[..., 0] < 8))
 
     try:
@@ -274,13 +274,13 @@ class MemoryPool(nn.Module):
             if router_pallas.supported(n, k, M):
                 # Stage 1 in one Pallas kernel: the [M, G, n] scores never
                 # leave VMEM (see router_pallas.py).
-                noise = None
-                if noisy:
-                    noise = (self.routing_noise * noise_scale) * jax.random.gumbel(
-                        self.make_rng("routing"), (G, M, n))
+                # the kernel draws the Gumbel noise itself from this seed
+                seed = (jax.random.bits(self.make_rng("routing"), (), jnp.uint32).astype(jnp.int32)
+                        if noisy else jnp.zeros((), jnp.int32))
+                scale = jnp.asarray(self.routing_noise * noise_scale if noisy else 0.0, jnp.float32)
                 idx_t, sub_t, sel_t, member_sum, p_sum, agree = router_pallas.fused_router(
-                    q.reshape(M, G, half).transpose(1, 0, 2), keys.reshape(G, n, half), temperature, noise,
-                    k, self.balance_on_clean_picks)
+                    q.reshape(M, G, half).transpose(1, 0, 2), keys.reshape(G, n, half), temperature, seed,
+                    scale, k, self.balance_on_clean_picks, noisy)
                 sub_idx_g, sub_scores_g, sel_vals_g = (x.transpose(1, 0, 2) for x in (idx_t, sub_t, sel_t))
                 fused = (member_sum, p_sum, agree)
         if fused is None:

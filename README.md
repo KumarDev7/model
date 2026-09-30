@@ -102,6 +102,7 @@ run per v5e chip):
 | dense d512 x 6 | 27.4M | 69-74% (2 seeds) | - | 3.31 |
 | **same + pool** | 28.7M (+67M pool) | **94.5%** | 0.2% / 0.4% | **3.21** |
 | dense d768 x 8 | 69.5M | 93.8% | - | 3.14 |
+| d768 x 8, 80k steps: dense / + pool | 69.5M / 71.3M (+67M) | 85.2% / **94.1%** | - / 0.5% | 3.20 / **3.16** |
 
 * **The knowledge is in the pool.** Shuffling the pool's reads (routing
   unchanged) or removing the pool takes recall to 0-0.4% in every pool
