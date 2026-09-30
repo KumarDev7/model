@@ -8,6 +8,16 @@ Raw results: `experiments/results/knowledge/` (`knowledge_verify_<arm>.json`,
 
 ## Summary
 
+**Update (2026-09-30, TPU v5e-8).** With Q/A mixed training the pool model
+answers questions about people it only read about in bios: 99.4-99.5% at
+20,000 people (d512 x 6, two seeds; dense with the same backbone 93.9%),
+98.9% for a 368M-parameter model (d768 x 12 + 1M-vector pool) trained on 3B
+tokens and 50,000 people on all 8 chips, and 0-0.2% with the pool reads
+shuffled. Checked on generated text, not only probe scores. Found and fixed
+on the way: multi-chip TPU training crashed (Pallas kernel under data
+parallelism), and bfloat16 attention softmax made long runs blow up late
+(now float32). Details in the last three sections.
+
 **Yes: the pool stores the knowledge, and the backbone reads it.** Every
 test that nothing in training optimises for agrees:
 
@@ -319,7 +329,7 @@ is the next thing to try.
 | 9 | `text_study.launch` could only pin CUDA GPUs | no way to run one arm per TPU chip | `--gpus tpu0,...,tpu7` pins each process to one chip (own port) |
 | 10 | Colab's image ships libtpu 0.0.21.1 with jax 0.7.2 (needs 0.0.23) | Mosaic (Pallas) kernels fail to load | documented; the router probes the kernel once and falls back to `lax.top_k` with a warning |
 | 11 | the Pallas top-k was called directly under a data-parallel mesh | multi-chip TPU training crashed ("Mosaic kernels cannot be automatically partitioned"); only GPU data parallel had been tested | the trainer registers the mesh and the kernel runs per device under `shard_map`; 8-chip test |
-| 12 | backbone Adam with beta2 = 0.999 | one of three 120k-step bfloat16 pool runs blew up after 90k steps (gradient norm 0.3 -> 2.8e4, Q/A 97% -> 39%) | `TrainConfig.adam_b2` (0.95 for long runs); cause not yet confirmed |
+| 12 | attention softmax computed in bfloat16 (Flax uses the module dtype) | late in training the first layers grew sharp: one of three 120k-step bfloat16 pool runs blew up (gradient norm 0.3 -> 2.8e4, Q/A 97% -> 39%), and so did the 368M run at 90k-95k (0.25 -> 2.4) with Adam beta2 0.95 | `ModelConfig.attn_fp32_softmax` (default on); the 368M run resumed from 90k with it stays at 0.25 |
 
 Not changed, needs a decision: `.github/workflows/run.yml` runs on every push,
 downloads an archive from an anonymous file host (`free.keep.sh`), builds it
@@ -561,9 +571,10 @@ checkpoint 99% of the embedding gradient sits in 20 token rows and at
 positions 0-3 of the windows (healthy seed: grad norm 0.37 vs 9.4 on the same
 held-out batch). The dense parameters used Adam with beta2 = 0.999 (optax
 default); long language-model runs normally use 0.95 for this reason, so
-`TrainConfig.adam_b2` was added and the large run below uses 0.95. Not yet
-verified to be the cause (one failure in three; no earlier checkpoint was
-kept to replay it).
+`TrainConfig.adam_b2` was added and the large run below uses 0.95. That
+was not the cause: the large run blew up the same way with 0.95, and
+resuming it with the attention softmax in float32 removed the growth (see
+the next section). The attention softmax now runs in float32.
 
 **Data parallel on TPU and the sharded pool.** Multi-chip training on TPU
 failed: XLA cannot partition a Pallas call (`Mosaic kernels cannot be
@@ -589,3 +600,90 @@ copies 3.5 ms, router ~6 ms, top-k 3.2 ms. A microbenchmark shows the
 gathers and scatters are bound by the number of rows touched (~14 ns per
 row; 18 GB/s of the chip's 819 GB/s), not by bytes: a bfloat16 table saves
 only 8% (3.69 -> 3.40 ms per gather). MFU: dense ~53%, pool ~15%.
+
+
+## Larger model on 3B tokens (TPU v5e-8, all chips data parallel)
+
+Date: 2026-09-30. d768 x 12 backbone (99M parameters) + a 1M-vector pool
+(269M values, memory layers 4 and 8, 4 heads x top-8), bfloat16, trained
+data parallel on all 8 chips (batch 256 x 256 tokens, replicated pool:
+160 ms/step, 410k tokens/s; the row-sharded pool measured 189 ms). Adam
+beta2 0.95, lr 6e-4 cosine to 6e-5, 100k steps = 6.6B tokens (2 passes).
+Data: 3.0B tokens of Ultra-FineWeb (8 files) + 211M tokens of bios and Q/A
+(6.6%): 50,000 people, 200,000 facts, Q/A documents for 25,000 of them.
+Results in `experiments/results/big_v5e8/`.
+
+Monitor (teacher-forced, 300 people per group) during training:
+
+| step | Q/A, trained with Q/A | Q/A, seen only in bios | same, pool shuffled | bio recall | never seen | held-out loss (pool shuffled) |
+|---|---|---|---|---|---|---|
+| 20k | 3.3% | 3.6% | 0.2% | 3.1% | 4.1% | 3.21 (4.12) |
+| 30k | 14.7% | 7.6% | 0.0% | 7.7% | 3.8% | 3.14 (4.10) |
+| 40k | 70.8% | 38.2% | 0.2% | 45.5% | 3.7% | 3.08 (4.08) |
+| 50k | 93.7% | 78.4% | 0.6% | 74.3% | 3.4% | 3.04 (4.07) |
+| 65k | 97.9% | 94.1% | 0.1% | 85.8% | 3.4% | 2.99 (4.09) |
+| 75k | 99.0% | 96.7% | 0.0% | 88.4% | 3.5% | 2.97 (4.07) |
+
+Facts start to be recalled after about one pass over the bios (~30k steps
+here: 50,000 people at 6.6% of the tokens), as in the smaller runs.
+
+**The late instability again, and its cause.** From 89k steps the
+gradient norm grew again (1k-step means 0.25, 0.33, 0.51, 1.05, 1.81, 2.44 at
+89k-95k; held-out loss 2.751 at 90k -> 2.769 at 95k) although beta2 was
+0.95, so beta2 was not the cause. Routing statistics stayed flat (temperature,
+balance, spread, pick agreement); the gradient sat in the first layers
+(layer-1 LayerNorm, embeddings, layer 0-1 attention) and at the first
+positions, with the weights essentially unchanged (the learning rate was
+~7e-5): the first layers had become sharp. The backbone's attention ran its
+softmax in bfloat16 (Flax computes it in the module's dtype). Resumed from
+the 90k checkpoint with the softmax in float32 and nothing else changed
+(resume is exact: same data order and step RNGs):
+
+| 1k-step mean gradient norm | 91k | 92k | 93k | 94k | 95k | held-out loss at 95k |
+|---|---|---|---|---|---|---|
+| bfloat16 softmax (original) | 0.33 | 0.51 | 1.05 | 1.81 | 2.44 | 2.769 |
+| **float32 softmax** | 0.24 | 0.25 | 0.25 | 0.25 | 0.25 | **2.744** |
+
+`ModelConfig.attn_fp32_softmax` (default on) now computes the attention
+softmax in float32 under 16-bit compute. The earlier float32 runs (15 pool
+models, 120k steps) never showed this, and the float16 runs were short.
+
+The run was stopped at 95k and continued from the 90k checkpoint with the
+float32 softmax to 100k steps (`pool_big_fix`; gradient norm 0.24-0.26 to
+the end, held-out loss 2.741). Final model, 368M parameters (100M on the
+accelerator without the pool values):
+
+| test | pool_big_fix (100k) | 90k checkpoint |
+|---|---|---|
+| **Q/A, seen only in bios**, greedy generation (1,000 questions) | **98.9%** (pool shuffled 0.2%) | 97.7% (0.0%) |
+| Q/A, trained with Q/A | 99.7% | 99.6% |
+| Q/A, never seen (chance) | 2.0% | 3.0% |
+| bio, training wording, greedy | 85.5% | 81.4% |
+| bio recall, teacher-forced, 2,000 people x 10 wordings: normal / shuffled / removed | 92.5% / 0.1% / 0.9% | 90.5% / 0.1% / 0.8% |
+| greedy "born in": normal / shuffled | 92.5% / 0% | 87.5% / 0% |
+| held-out web loss: normal / shuffled / removed | 2.741 / 3.755 / 3.505 | 2.751 / 3.739 / 3.499 |
+| targeted deletion, own 4-per-head vectors (0.02% of the pool) / as many random | 5.0% / 99.9% left | 6.8% / 99.0% |
+| Q/A bio-only, pool stored float32 / int8 / int4 | 98.6% / 98.6% / 98.0% | 98.8% / 98.7% / 97.7% |
+| Q/A bio-only reading 4 instead of 8 vectors per head | 90.2% | 86.8% |
+| sub-keys used / pool read on held-out web text | 100% / 76% (of 1M, in 65k tokens) | 100% / 76% |
+
+Generated text (people seen only in bios; greedy):
+
+```
+Q: What is the job of Miroskkor Vekzim? A:  ->  a librarian. Q: What did Mi...     (truth: a librarian)
+Q: Where was Zimbrayar Korulfen born? A:     ->  Hanoi. Q: What did Zim...          (truth: Hanoi)
+same, pool reads shuffled                    ->  a day. The job of Zimbray...
+What is Stable Diffusion? Stable Diffusion is a free, open-source tool designed by Stability AI to create
+high-quality images,  ->  videos, and other media. It is a powerful tool that allows users to create
+high-quality videos, images, and other media.
+```
+
+* **The model trains well at this size on all 8 chips**, uses the pool
+  (0.8-1.0 nats worse held-out loss without it) and answers questions about
+  people it only read about in bios 98.9% of the time, with 0.2% when the
+  pool reads are shuffled: the knowledge is in the pool and the backbone
+  reads it.
+* No collapse: every sub-key is used, the routing statistics were flat from
+  20k steps to the end.
+* Not run at this size: the dense twin (no baseline for the same compute),
+  and a second seed.

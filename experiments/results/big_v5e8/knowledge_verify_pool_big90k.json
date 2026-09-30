@@ -1,0 +1,386 @@
+[
+ {
+  "arm": "pool_big90k",
+  "flags": "",
+  "params_total": 368371201,
+  "params_on_accelerator_without_pool_values": 99935745,
+  "train_seconds": null,
+  "history": [],
+  "recall": {
+   "A_trained/seen_wording": {
+    "items": 80000,
+    "normal": 0.9051125,
+    "normal_logprob": -0.36202186346054077,
+    "by_relation": {
+     "born": 0.88635,
+     "job": 0.9229,
+     "study": 0.9018,
+     "food": 0.9094
+    },
+    "shuffled": 0.001025,
+    "shuffled_logprob": -12.497049331665039,
+    "removed": 0.00825,
+    "removed_logprob": -10.331406593322754
+   },
+   "A_trained/new_wording": {
+    "items": 16000,
+    "normal": 0.007375,
+    "normal_logprob": -7.959988117218018,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.02875,
+     "study": 0.00075,
+     "food": 0.0
+    },
+    "shuffled": 0.0013125,
+    "shuffled_logprob": -13.925740242004395,
+    "removed": 0.0004375,
+    "removed_logprob": -12.931244850158691
+   },
+   "B_never_seen/seen_wording": {
+    "items": 12000,
+    "normal": 0.036583333333333336,
+    "normal_logprob": -7.826138019561768,
+    "by_relation": {
+     "born": 0.03966666666666667,
+     "job": 0.044,
+     "study": 0.033,
+     "food": 0.029666666666666668
+    },
+    "shuffled": 0.001,
+    "shuffled_logprob": -12.50236701965332,
+    "removed": 0.0075,
+    "removed_logprob": -10.337784767150879
+   },
+   "B_never_seen/new_wording": {
+    "items": 2400,
+    "normal": 0.0020833333333333333,
+    "normal_logprob": -8.232810974121094,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.008333333333333333,
+     "study": 0.0,
+     "food": 0.0
+    },
+    "shuffled": 0.0008333333333333334,
+    "shuffled_logprob": -13.908865928649902,
+    "removed": 0.0004166666666666667,
+    "removed_logprob": -12.844461441040039
+   }
+  },
+  "reliance": {
+   "loss": {
+    "web_heldout": {
+     "normal": 2.751344710588455,
+     "normal_ppl": 15.663680846123333,
+     "shuffled": 3.7387667298316956,
+     "shuffled_ppl": 42.04610397100482,
+     "removed": 3.4989020824432373,
+     "removed_ppl": 33.07911387434736
+    },
+    "bios_known_people": {
+     "normal": 0.24268702790141106,
+     "normal_ppl": 1.2746696256562742,
+     "shuffled": 2.537159353494644,
+     "shuffled_ppl": 12.643703617256001,
+     "removed": 1.8771637827157974,
+     "removed_ppl": 6.53494403214453
+    },
+    "bios_unknown_people": {
+     "normal": 1.4643010050058365,
+     "normal_ppl": 4.324519366198328,
+     "shuffled": 2.7479036450386047,
+     "shuffled_ppl": 15.609873723591589,
+     "removed": 2.0748594999313354,
+     "removed_ppl": 7.96342751831786
+    }
+   },
+   "greedy_born_in": {
+    "normal": {
+     "correct": 0.875,
+     "samples": [
+      {
+       "name": "Quelka Pimkor",
+       "truth": "Quito",
+       "generated": "Quito."
+      },
+      {
+       "name": "Clevelyar Cleis",
+       "truth": "Recife",
+       "generated": "Riga."
+      },
+      {
+       "name": "Zimraszim Osktantor",
+       "truth": "Recife",
+       "generated": "Recife. The"
+      },
+      {
+       "name": "Quelcleyar Fenquelfen",
+       "truth": "Havana",
+       "generated": "Havana."
+      },
+      {
+       "name": "Narzimnar Isisquel",
+       "truth": "Riga",
+       "generated": "Riga."
+      },
+      {
+       "name": "Rotan Narisbel",
+       "truth": "Odessa",
+       "generated": "Odessa."
+      },
+      {
+       "name": "Belbra Mirzodru",
+       "truth": "Cairo",
+       "generated": "Cairo."
+      },
+      {
+       "name": "Siltor Rasnar",
+       "truth": "Bogota",
+       "generated": "Bogota."
+      }
+     ]
+    },
+    "shuffled": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Quelka Pimkor",
+       "truth": "Quito",
+       "generated": ": the same as"
+      },
+      {
+       "name": "Clevelyar Cleis",
+       "truth": "Recife",
+       "generated": "the city of the"
+      },
+      {
+       "name": "Zimraszim Osktantor",
+       "truth": "Recife",
+       "generated": "the city of Z"
+      },
+      {
+       "name": "Quelcleyar Fenquelfen",
+       "truth": "Havana",
+       "generated": "Quelcley"
+      },
+      {
+       "name": "Narzimnar Isisquel",
+       "truth": "Riga",
+       "generated": "theology."
+      },
+      {
+       "name": "Rotan Narisbel",
+       "truth": "Odessa",
+       "generated": "the city of the"
+      },
+      {
+       "name": "Belbra Mirzodru",
+       "truth": "Cairo",
+       "generated": "the city of the"
+      },
+      {
+       "name": "Siltor Rasnar",
+       "truth": "Bogota",
+       "generated": "the city of the"
+      }
+     ]
+    },
+    "removed": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Quelka Pimkor",
+       "truth": "Quito",
+       "generated": "Quelka P"
+      },
+      {
+       "name": "Clevelyar Cleis",
+       "truth": "Recife",
+       "generated": "the city of the"
+      },
+      {
+       "name": "Zimraszim Osktantor",
+       "truth": "Recife",
+       "generated": "the city of Z"
+      },
+      {
+       "name": "Quelcleyar Fenquelfen",
+       "truth": "Havana",
+       "generated": "Quelcley"
+      },
+      {
+       "name": "Narzimnar Isisquel",
+       "truth": "Riga",
+       "generated": "the city of Z"
+      },
+      {
+       "name": "Rotan Narisbel",
+       "truth": "Odessa",
+       "generated": "the city of Z"
+      },
+      {
+       "name": "Belbra Mirzodru",
+       "truth": "Cairo",
+       "generated": "the city of the"
+      },
+      {
+       "name": "Siltor Rasnar",
+       "truth": "Bogota",
+       "generated": "the city of the"
+      }
+     ]
+    }
+   }
+  },
+  "usage": {
+   "temperature": 23.180734266363334,
+   "web_heldout": [
+    {
+     "coverage": 0.5096836090087891,
+     "active": 0.5096836090087891,
+     "spread": 0.2896633185131834,
+     "max_share_x_fair": 271.0,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.341984611004591
+    },
+    {
+     "coverage": 0.49439334869384766,
+     "active": 0.49439334869384766,
+     "spread": 0.2812759580452737,
+     "max_share_x_fair": 122.0,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.32190386205911636
+    }
+   ],
+   "web_heldout_all_layers": {
+    "coverage": 0.7625865936279297,
+    "active": 0.7625865936279297,
+    "spread": 0.4575942397704725,
+    "max_share_x_fair": 135.5,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.3319442365318537
+   },
+   "bios_known_people": [
+    {
+     "coverage": 0.1130361557006836,
+     "active": 0.1130361557006836,
+     "spread": 0.029016705735038464,
+     "max_share_x_fair": 1844.5,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.38481538370251656
+    },
+    {
+     "coverage": 0.1303873062133789,
+     "active": 0.1303873062133789,
+     "spread": 0.02534486727329335,
+     "max_share_x_fair": 1848.5,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.4594229459762573
+    }
+   ],
+   "bios_known_people_all_layers": {
+    "coverage": 0.22943878173828125,
+    "active": 0.22943878173828125,
+    "spread": 0.0525875435299777,
+    "max_share_x_fair": 924.25,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.42211916483938694
+   },
+   "fact_answers": [
+    {
+     "coverage": 0.012660980224609375,
+     "active": 0.012660980224609375,
+     "spread": 0.00408923088101869,
+     "max_share_x_fair": 4924.481172942353,
+     "subkeys_used": 0.89599609375,
+     "top1_weight": 0.4641142785549164,
+     "effective_vectors_per_head": 4.131356239318848
+    },
+    {
+     "coverage": 0.0154266357421875,
+     "active": 0.0154266357421875,
+     "spread": 0.004652283935704126,
+     "max_share_x_fair": 4491.3597689659,
+     "subkeys_used": 0.95361328125,
+     "top1_weight": 0.48408186435699463,
+     "effective_vectors_per_head": 3.9343178272247314
+    }
+   ]
+  },
+  "targeted": {
+   "n_facts": 200,
+   "levels": [
+    {
+     "vectors_zeroed_per_head_per_read": 1,
+     "vectors_zeroed_mean": 43.165,
+     "share_of_pool": 4.116535186767578e-05,
+     "overlap_own_vs_other_person": 0.405163006377089,
+     "recall_after": {
+      "own": {
+       "seen": 0.23299999999999998,
+       "new": 0.0075
+      },
+      "other_person_same_relation": {
+       "seen": 0.3685,
+       "new": 0.0075
+      },
+      "random": {
+       "seen": 0.99,
+       "new": 0.015
+      }
+     },
+     "other_facts_before": 0.8146920289855072,
+     "other_facts_after_own_zeroed": 0.706748188405797
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 4,
+     "vectors_zeroed_mean": 195.49,
+     "share_of_pool": 0.00018643379211425782,
+     "overlap_own_vs_other_person": 0.37074115330378254,
+     "recall_after": {
+      "own": {
+       "seen": 0.068,
+       "new": 0.005
+      },
+      "other_person_same_relation": {
+       "seen": 0.171,
+       "new": 0.0075
+      },
+      "random": {
+       "seen": 0.99,
+       "new": 0.015
+      }
+     },
+     "other_facts_before": 0.8069927536231885,
+     "other_facts_after_own_zeroed": 0.648215579710145
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 8,
+     "vectors_zeroed_mean": 387.865,
+     "share_of_pool": 0.00036989688873291016,
+     "overlap_own_vs_other_person": 0.38431330575410577,
+     "recall_after": {
+      "own": {
+       "seen": 0.057,
+       "new": 0.005
+      },
+      "other_person_same_relation": {
+       "seen": 0.124,
+       "new": 0.005
+      },
+      "random": {
+       "seen": 0.99,
+       "new": 0.015
+      }
+     },
+     "other_facts_before": 0.8214583333333334,
+     "other_facts_after_own_zeroed": 0.6479166666666666
+    }
+   ],
+   "new_wording_recall_before": 0.0125,
+   "seen_wording_recall_before": 1.0
+  },
+  "verify_seconds": 144.76841926574707
+ }
+]
