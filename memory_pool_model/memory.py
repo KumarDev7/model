@@ -233,11 +233,17 @@ class MemoryPool(nn.Module):
             jnp.clip(log_t, jnp.log(self.min_temperature), jnp.log(self.max_temperature)) - log_t)
         temperature = jnp.exp(log_t)
 
-        # Cosine similarity of each query half with every sub-key.
-        cos = jnp.einsum("mhcd,hcnd->mhcn", q, keys)
+        # Cosine similarity of each query half with every sub-key. Heads and
+        # halves are one axis of G = 2H codebooks: [M, G, n] tiles cleanly on
+        # TPU, while [M, H, 2, n] (a size-2 dim next to the minor one) made
+        # XLA relayout every routing tensor (v5e: 1.6 ms for the top-k
+        # reshape alone, plus slower elementwise passes).
+        M = q.shape[0]
+        G = 2 * H
+        cos = jnp.einsum("mgd,gnd->mgn", q.reshape(M, G, half), keys.reshape(G, n, half))
         scores = cos * temperature
         if self.query_scale:
-            scores = scores * q_len
+            scores = scores * q_len.reshape(M, G, 1)
 
         # Noise only changes *which* slots are selected, never their weights.
         if train and self.routing_noise > 0:
@@ -247,9 +253,11 @@ class MemoryPool(nn.Module):
             select_scores = scores
 
         # Stage 1: top-k sub-keys for each half.
-        sel_vals, sub_idx = _top_k(select_scores, k)  # [M, H, 2, k]
-        sub_scores = take_last(scores, sub_idx)  # differentiable
-        sub_select = sel_vals  # = select_scores at sub_idx (selection only)
+        sel_vals_g, sub_idx_g = _top_k(select_scores, k)  # [M, G, k]
+        sub_scores_g = take_last(scores, sub_idx_g)  # differentiable
+        sub_idx = sub_idx_g.reshape(M, H, 2, k)
+        sub_scores = sub_scores_g.reshape(M, H, 2, k)
+        sub_select = sel_vals_g.reshape(M, H, 2, k)  # = select_scores at sub_idx (selection only)
 
         # Stage 2: exact top-k over the k*k cartesian candidates.
         cand = sub_scores[..., 0, :, None] + sub_scores[..., 1, None, :]
@@ -288,7 +296,6 @@ class MemoryPool(nn.Module):
         # one per layer: per-head slot counts, from which the sub-key counts
         # and the pool-wide slot counts are sums. Top-k memberships are
         # counted densely by comparing scores with the k-th largest.
-        M = q.shape[0]
         if train and jax.default_backend() == "tpu":
             # Training on TPU: no scatter at all. Sub-key counts by a fused
             # one-hot reduction (exact); per-slot counts are left out (None)
@@ -310,13 +317,13 @@ class MemoryPool(nn.Module):
         # them); pick_agreement is then not measured (NaN).
         clean = select_scores is scores or not self.balance_on_clean_picks
         if clean:
-            member = select_scores >= sel_vals[..., -1:]
+            member = select_scores >= sel_vals_g[..., -1:]  # [M, G, n]
         else:
-            clean_vals = _top_k(scores, k)[0]
+            clean_vals = _top_k(scores, k)[0]  # [M, G, k]
             member = scores >= clean_vals[..., -1:]
         # exact up to ties at the k-th score (a zero-probability event for
         # float scores), in which case a tied sub-key is counted too
-        f = jax.lax.stop_gradient(jnp.sum(member, axis=0, dtype=jnp.float32) / (M * k))  # [H, 2, n]
+        f = jax.lax.stop_gradient(jnp.sum(member, axis=0, dtype=jnp.float32) / (M * k)).reshape(H, 2, n)
         # Share of the noisy sub-key picks that the clean router also makes.
         # Near 0 means the noise, not the router, decides what training reads
         # (Ultra-FineWeb, 512 sub-keys, routing_noise 1.0: 0.4% of the slots
@@ -326,10 +333,10 @@ class MemoryPool(nn.Module):
         elif clean:
             pick_agreement = jnp.full((), jnp.nan, jnp.float32)
         else:
-            pick_agreement = jnp.mean(sub_scores >= clean_vals[..., -1:])
+            pick_agreement = jnp.mean(sub_scores_g >= clean_vals[..., -1:])
         # P: mean router probability for each sub-key (differentiable).
         p_scores = scores if self.balance_temperature_grad else cos * jax.lax.stop_gradient(temperature)
-        P = jax.nn.softmax(p_scores, axis=-1).mean(axis=0)  # [H, 2, n]
+        P = jax.nn.softmax(p_scores, axis=-1).mean(axis=0).reshape(H, 2, n)
         # Equals 1 when routing is perfectly uniform; grows with collapse.
         balance_loss = n * jnp.mean(jnp.sum(f * P, axis=-1))
 

@@ -240,7 +240,8 @@ Pool model above, one step, TPU v5e-1:
 | `lax.top_k`; one usage scatter per layer; dense scatter-add row gradients + masked lazy Adam | 252 |
 | routing-score gathers as fused one-hot reductions (forward and backward) | 117 |
 | Pallas top-k kernel | 92 |
-| no layout barrier on the fetched rows on TPU; no usage-count scatter in TPU training (JAX 0.11, v5e-8 chip) | **72** |
+| no layout barrier on the fetched rows on TPU; no usage-count scatter in TPU training (JAX 0.11, v5e-8 chip) | 72 |
+| routing tensors laid out as [tokens, 2 x heads, sub-keys] | **70** |
 
 Profiled with `jax.profiler` (per-op device time). The matmuls were never
 the cost: each `take_along_axis` over the [8192, 4, 2, 512] score tensor

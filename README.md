@@ -238,7 +238,8 @@ TPU v5e-1, JAX 0.7.2:
 | `lax.top_k` instead of argmax rounds; one usage scatter per layer instead of three; row gradients by one dense scatter-add + masked lazy Adam instead of sort + segment-sum | 252 ms |
 | gathers of routing scores (`take_along_axis`) as fused one-hot reductions, forward and backward | 117 ms |
 | Pallas top-k kernel (`memory_pool_model/topk_pallas.py`) instead of XLA's sort-based top-k | 92 ms |
-| no layout barrier on the fetched rows (GPU only now); no usage-count scatter in TPU training steps (sub-key counts by a fused one-hot sum, touched rows from the gradient) | **72 ms** (JAX 0.11) |
+| no layout barrier on the fetched rows (GPU only now); no usage-count scatter in TPU training steps (sub-key counts by a fused one-hot sum, touched rows from the gradient) | 72 ms (JAX 0.11) |
+| routing tensors as [tokens, 2 x heads, sub-keys] instead of [tokens, heads, 2, sub-keys] (tiles cleanly on TPU) | **70 ms** |
 
 The profile showed the time was not in the matmuls: TPU gathers along a
 short minor axis took 16.5 ms each (8 per step) and their scatter-add
