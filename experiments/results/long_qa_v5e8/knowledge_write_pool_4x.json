@@ -1,0 +1,87 @@
+[
+ {
+  "arm": "pool_4x",
+  "steps": 3000,
+  "before": {
+   "A": {
+    "normal": 0.9728,
+    "shuffled": 0.0004,
+    "removed": 0.0004
+   },
+   "B": {
+    "normal": 0.032075,
+    "shuffled": 0.001175,
+    "removed": 0.00115
+   },
+   "B_new_wording": {
+    "normal": 0.003125,
+    "shuffled": 0.000875,
+    "removed": 0.00025
+   },
+   "heldout_ppl": 31.46200964844916
+  },
+  "after": {
+   "full_finetune": {
+    "A": {
+     "normal": 0.1616,
+     "shuffled": 0.0006,
+     "removed": 0.0012
+    },
+    "B": {
+     "normal": 0.99975,
+     "shuffled": 0.001425,
+     "removed": 0.003475
+    },
+    "B_new_wording": {
+     "normal": 0.165125,
+     "shuffled": 0.001875,
+     "removed": 0.003625
+    },
+    "heldout_ppl": 39.273415632810305,
+    "seconds": 163.16891288757324
+   },
+   "pool_vectors_only": {
+    "A": {
+     "normal": 0.8658,
+     "shuffled": 0.0002,
+     "removed": 0.0004
+    },
+    "B": {
+     "normal": 0.9933,
+     "shuffled": 0.0012,
+     "removed": 0.00115
+    },
+    "B_new_wording": {
+     "normal": 0.01225,
+     "shuffled": 0.00075,
+     "removed": 0.00025
+    },
+    "heldout_ppl": 32.06176255977468,
+    "seconds": 160.7692096233368,
+    "backbone_unchanged": true,
+    "pool_vectors_changed": 0.9999961853027344
+   },
+   "pool_vectors_only_with_replay": {
+    "A": {
+     "normal": 0.9678,
+     "shuffled": 0.0004,
+     "removed": 0.0004
+    },
+    "B": {
+     "normal": 0.9906,
+     "shuffled": 0.001125,
+     "removed": 0.00115
+    },
+    "B_new_wording": {
+     "normal": 0.01175,
+     "shuffled": 0.00175,
+     "removed": 0.00025
+    },
+    "heldout_ppl": 32.05825410072905,
+    "seconds": 161.1575858592987,
+    "backbone_unchanged": true,
+    "pool_vectors_changed": 1.0
+   }
+  }
+ }
+]

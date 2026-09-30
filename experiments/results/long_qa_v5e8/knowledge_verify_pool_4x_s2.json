@@ -1,0 +1,519 @@
+[
+ {
+  "arm": "pool_4x_s2",
+  "flags": "--d_model 512 --n_layers 6 --memory_layers 2,4 --n_sub_keys 512 --d_key 128 --d_value 256 --memory_ffn true --seed 2",
+  "params_total": 95857153,
+  "params_on_accelerator_without_pool_values": 28748289,
+  "train_seconds": 6004.1350066661835,
+  "history": [
+   {
+    "step": 10000,
+    "ce": 4.105447173118591,
+    "acc": 0.307159423828125,
+    "acc_nopool": 0.26275634765625,
+    "acc_shuffled_pool": 0.25823974609375,
+    "ce_shuffled_pool": 4.57211709022522,
+    "pool_coverage": 0.8882026672363281,
+    "pool_active": 0.8882026672363281,
+    "pool_spread": 0.479716420173645
+   },
+   {
+    "step": 20000,
+    "ce": 3.8896195888519287,
+    "acc": 0.327789306640625,
+    "acc_nopool": 0.272186279296875,
+    "acc_shuffled_pool": 0.261566162109375,
+    "ce_shuffled_pool": 4.464224576950073,
+    "pool_coverage": 0.9064826965332031,
+    "pool_active": 0.9064826965332031,
+    "pool_spread": 0.522541880607605
+   },
+   {
+    "step": 30000,
+    "ce": 3.769953966140747,
+    "acc": 0.342681884765625,
+    "acc_nopool": 0.280029296875,
+    "acc_shuffled_pool": 0.2706298828125,
+    "ce_shuffled_pool": 4.395748853683472,
+    "pool_coverage": 0.9112319946289062,
+    "pool_active": 0.9112319946289062,
+    "pool_spread": 0.5372335314750671
+   },
+   {
+    "step": 40000,
+    "ce": 3.691006362438202,
+    "acc": 0.347991943359375,
+    "acc_nopool": 0.28277587890625,
+    "acc_shuffled_pool": 0.2691650390625,
+    "ce_shuffled_pool": 4.37324845790863,
+    "pool_coverage": 0.9176101684570312,
+    "pool_active": 0.9176101684570312,
+    "pool_spread": 0.5500330328941345
+   },
+   {
+    "step": 50000,
+    "ce": 3.64258474111557,
+    "acc": 0.353057861328125,
+    "acc_nopool": 0.2816162109375,
+    "acc_shuffled_pool": 0.266143798828125,
+    "ce_shuffled_pool": 4.368270635604858,
+    "pool_coverage": 0.9190330505371094,
+    "pool_active": 0.9190330505371094,
+    "pool_spread": 0.5525060892105103
+   },
+   {
+    "step": 60000,
+    "ce": 3.595672309398651,
+    "acc": 0.35888671875,
+    "acc_nopool": 0.284423828125,
+    "acc_shuffled_pool": 0.26959228515625,
+    "ce_shuffled_pool": 4.352604508399963,
+    "pool_coverage": 0.9214820861816406,
+    "pool_active": 0.9214820861816406,
+    "pool_spread": 0.5604987740516663
+   },
+   {
+    "step": 70000,
+    "ce": 3.552564561367035,
+    "acc": 0.363494873046875,
+    "acc_nopool": 0.287994384765625,
+    "acc_shuffled_pool": 0.270843505859375,
+    "ce_shuffled_pool": 4.332241415977478,
+    "pool_coverage": 0.9219627380371094,
+    "pool_active": 0.9219627380371094,
+    "pool_spread": 0.561511754989624
+   },
+   {
+    "step": 80000,
+    "ce": 3.5262205004692078,
+    "acc": 0.366363525390625,
+    "acc_nopool": 0.2862548828125,
+    "acc_shuffled_pool": 0.268951416015625,
+    "ce_shuffled_pool": 4.342277765274048,
+    "pool_coverage": 0.9209823608398438,
+    "pool_active": 0.9209823608398438,
+    "pool_spread": 0.5604150295257568
+   },
+   {
+    "step": 90000,
+    "ce": 3.4895665049552917,
+    "acc": 0.371490478515625,
+    "acc_nopool": 0.2877197265625,
+    "acc_shuffled_pool": 0.269744873046875,
+    "ce_shuffled_pool": 4.331608295440674,
+    "pool_coverage": 0.9212112426757812,
+    "pool_active": 0.9212112426757812,
+    "pool_spread": 0.5634059906005859
+   },
+   {
+    "step": 100000,
+    "ce": 3.4717401266098022,
+    "acc": 0.37237548828125,
+    "acc_nopool": 0.2894287109375,
+    "acc_shuffled_pool": 0.26922607421875,
+    "ce_shuffled_pool": 4.331404328346252,
+    "pool_coverage": 0.9212722778320312,
+    "pool_active": 0.9212722778320312,
+    "pool_spread": 0.5634551048278809
+   },
+   {
+    "step": 110000,
+    "ce": 3.4590604305267334,
+    "acc": 0.374969482421875,
+    "acc_nopool": 0.290618896484375,
+    "acc_shuffled_pool": 0.270416259765625,
+    "ce_shuffled_pool": 4.333077549934387,
+    "pool_coverage": 0.9214897155761719,
+    "pool_active": 0.9214897155761719,
+    "pool_spread": 0.564454197883606
+   },
+   {
+    "step": 120000,
+    "ce": 3.4525582790374756,
+    "acc": 0.375640869140625,
+    "acc_nopool": 0.29119873046875,
+    "acc_shuffled_pool": 0.27056884765625,
+    "ce_shuffled_pool": 4.3451247215271,
+    "pool_coverage": 0.922271728515625,
+    "pool_active": 0.922271728515625,
+    "pool_spread": 0.5670649409294128
+   }
+  ],
+  "recall": {
+   "A_trained/seen_wording": {
+    "items": 80000,
+    "normal": 0.9651625,
+    "normal_logprob": -0.15044423937797546,
+    "by_relation": {
+     "born": 0.96745,
+     "job": 0.9754,
+     "study": 0.9469,
+     "food": 0.9709
+    },
+    "shuffled": 0.00115,
+    "shuffled_logprob": -12.767594337463379,
+    "removed": 0.0022375,
+    "removed_logprob": -10.70151424407959
+   },
+   "A_trained/new_wording": {
+    "items": 16000,
+    "normal": 0.000875,
+    "normal_logprob": -8.942459106445312,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.00175,
+     "study": 0.0,
+     "food": 0.00175
+    },
+    "shuffled": 0.0015625,
+    "shuffled_logprob": -14.314715385437012,
+    "removed": 0.0003125,
+    "removed_logprob": -12.860956192016602
+   },
+   "B_never_seen/seen_wording": {
+    "items": 12000,
+    "normal": 0.023833333333333335,
+    "normal_logprob": -8.52173900604248,
+    "by_relation": {
+     "born": 0.018333333333333333,
+     "job": 0.036,
+     "study": 0.023666666666666666,
+     "food": 0.017333333333333333
+    },
+    "shuffled": 0.00125,
+    "shuffled_logprob": -12.757684707641602,
+    "removed": 0.00125,
+    "removed_logprob": -10.70580768585205
+   },
+   "B_never_seen/new_wording": {
+    "items": 2400,
+    "normal": 0.0,
+    "normal_logprob": -9.006282806396484,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.0,
+     "study": 0.0,
+     "food": 0.0
+    },
+    "shuffled": 0.00125,
+    "shuffled_logprob": -14.308752059936523,
+    "removed": 0.0,
+    "removed_logprob": -12.8789701461792
+   }
+  },
+  "reliance": {
+   "loss": {
+    "web_heldout": {
+     "normal": 3.2324677407741547,
+     "normal_ppl": 25.34211764790896,
+     "shuffled": 4.16047677397728,
+     "shuffled_ppl": 64.10207751791306,
+     "removed": 3.919918030500412,
+     "removed_ppl": 50.39631364814365
+    },
+    "bios_known_people": {
+     "normal": 0.24312118627130985,
+     "normal_ppl": 1.2752231542939594,
+     "shuffled": 2.6695579886436462,
+     "shuffled_ppl": 14.433587972824007,
+     "removed": 2.0442467778921127,
+     "removed_ppl": 7.7233389568174715
+    },
+    "bios_unknown_people": {
+     "normal": 1.5245153307914734,
+     "normal_ppl": 4.592916984332061,
+     "shuffled": 2.8269001245498657,
+     "shuffled_ppl": 16.89301333887474,
+     "removed": 2.19486466050148,
+     "removed_ppl": 8.978785790218273
+    }
+   },
+   "greedy_born_in": {
+    "normal": {
+     "correct": 0.95,
+     "samples": [
+      {
+       "name": "Zoclevel Pimzimfen",
+       "truth": "Recife",
+       "generated": "Recife. Z"
+      },
+      {
+       "name": "Lumyar Velrashal",
+       "truth": "Perth",
+       "generated": "Perth. The"
+      },
+      {
+       "name": "Oskul Fendru",
+       "truth": "Hanoi",
+       "generated": "Hanoi."
+      },
+      {
+       "name": "Zosil Braro",
+       "truth": "Minsk",
+       "generated": "Minsk."
+      },
+      {
+       "name": "Vekcle Silgorquel",
+       "truth": "Leeds",
+       "generated": "Leeds."
+      },
+      {
+       "name": "Velul Torwenwen",
+       "truth": "Tunis",
+       "generated": "Tunis."
+      },
+      {
+       "name": "Torraslum Dovbra",
+       "truth": "Leeds",
+       "generated": "Leeds."
+      },
+      {
+       "name": "Isdovlum Lumzimwen",
+       "truth": "Dakar",
+       "generated": "Dakar."
+      }
+     ]
+    },
+    "shuffled": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Zoclevel Pimzimfen",
+       "truth": "Recife",
+       "generated": "a big fan of"
+      },
+      {
+       "name": "Lumyar Velrashal",
+       "truth": "Perth",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Oskul Fendru",
+       "truth": "Hanoi",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Zosil Braro",
+       "truth": "Minsk",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Vekcle Silgorquel",
+       "truth": "Leeds",
+       "generated": "a big fan to"
+      },
+      {
+       "name": "Velul Torwenwen",
+       "truth": "Tunis",
+       "generated": "a large number of"
+      },
+      {
+       "name": "Torraslum Dovbra",
+       "truth": "Leeds",
+       "generated": "Torzim"
+      },
+      {
+       "name": "Isdovlum Lumzimwen",
+       "truth": "Dakar",
+       "generated": "nursing. The job"
+      }
+     ]
+    },
+    "removed": {
+     "correct": 0.0,
+     "samples": [
+      {
+       "name": "Zoclevel Pimzimfen",
+       "truth": "Recife",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Lumyar Velrashal",
+       "truth": "Perth",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Oskul Fendru",
+       "truth": "Hanoi",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Zosil Braro",
+       "truth": "Minsk",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Vekcle Silgorquel",
+       "truth": "Leeds",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Velul Torwenwen",
+       "truth": "Tunis",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Torraslum Dovbra",
+       "truth": "Leeds",
+       "generated": "the world of the"
+      },
+      {
+       "name": "Isdovlum Lumzimwen",
+       "truth": "Dakar",
+       "generated": "the world of the"
+      }
+     ]
+    }
+   }
+  },
+  "usage": {
+   "temperature": 18.686469422880073,
+   "web_heldout": [
+    {
+     "coverage": 0.82830810546875,
+     "active": 0.82830810546875,
+     "spread": 0.41227311052217175,
+     "max_share_x_fair": 145.875,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.3518422581255436
+    },
+    {
+     "coverage": 0.8365821838378906,
+     "active": 0.8365821838378906,
+     "spread": 0.4341933188777288,
+     "max_share_x_fair": 90.25,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.33373041450977325
+    }
+   ],
+   "web_heldout_all_layers": {
+    "coverage": 0.97711181640625,
+    "active": 0.9363670349121094,
+    "spread": 0.6008430718795084,
+    "max_share_x_fair": 73.25,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.3427863363176584
+   },
+   "bios_known_people": [
+    {
+     "coverage": 0.28253936767578125,
+     "active": 0.28253936767578125,
+     "spread": 0.0875829727098128,
+     "max_share_x_fair": 411.25,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.3722904846072197
+    },
+    {
+     "coverage": 0.4750213623046875,
+     "active": 0.4750213623046875,
+     "spread": 0.12934285280433813,
+     "max_share_x_fair": 347.0,
+     "subkeys_used": 1.0,
+     "top1_weight": 0.4031585641205311
+    }
+   ],
+   "bios_known_people_all_layers": {
+    "coverage": 0.6253776550292969,
+    "active": 0.5361747741699219,
+    "spread": 0.19166955520846932,
+    "max_share_x_fair": 205.625,
+    "subkeys_used": 1.0,
+    "top1_weight": 0.3877245243638754
+   },
+   "fact_answers": [
+    {
+     "coverage": 0.049533843994140625,
+     "active": 0.049533843994140625,
+     "spread": 0.016125796374135404,
+     "max_share_x_fair": 1277.4337268879483,
+     "subkeys_used": 0.978515625,
+     "top1_weight": 0.4349863827228546,
+     "effective_vectors_per_head": 4.450654029846191
+    },
+    {
+     "coverage": 0.065093994140625,
+     "active": 0.065093994140625,
+     "spread": 0.02064333707525882,
+     "max_share_x_fair": 1709.0238360436622,
+     "subkeys_used": 0.998046875,
+     "top1_weight": 0.4259469509124756,
+     "effective_vectors_per_head": 4.49038553237915
+    }
+   ]
+  },
+  "targeted": {
+   "n_facts": 200,
+   "levels": [
+    {
+     "vectors_zeroed_per_head_per_read": 1,
+     "vectors_zeroed_mean": 46.72,
+     "share_of_pool": 0.00017822265625,
+     "overlap_own_vs_other_person": 0.3515604782642269,
+     "recall_after": {
+      "own": {
+       "seen": 0.3125,
+       "new": 0.0
+      },
+      "other_person_same_relation": {
+       "seen": 0.47600000000000003,
+       "new": 0.0
+      },
+      "random": {
+       "seen": 0.998,
+       "new": 0.0
+      }
+     },
+     "other_facts_before": 0.88375,
+     "other_facts_after_own_zeroed": 0.7958333333333334
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 4,
+     "vectors_zeroed_mean": 199.31,
+     "share_of_pool": 0.0007603073120117188,
+     "overlap_own_vs_other_person": 0.33667123882594296,
+     "recall_after": {
+      "own": {
+       "seen": 0.08850000000000001,
+       "new": 0.0
+      },
+      "other_person_same_relation": {
+       "seen": 0.2615,
+       "new": 0.0
+      },
+      "random": {
+       "seen": 0.998,
+       "new": 0.0
+      }
+     },
+     "other_facts_before": 0.8911956521739129,
+     "other_facts_after_own_zeroed": 0.7373460144927536
+    },
+    {
+     "vectors_zeroed_per_head_per_read": 8,
+     "vectors_zeroed_mean": 390.48,
+     "share_of_pool": 0.00148956298828125,
+     "overlap_own_vs_other_person": 0.34795106036255546,
+     "recall_after": {
+      "own": {
+       "seen": 0.07550000000000001,
+       "new": 0.0
+      },
+      "other_person_same_relation": {
+       "seen": 0.226,
+       "new": 0.0
+      },
+      "random": {
+       "seen": 0.9944999999999999,
+       "new": 0.0
+      }
+     },
+     "other_facts_before": 0.8881068840579709,
+     "other_facts_after_own_zeroed": 0.7188768115942028
+    }
+   ],
+   "new_wording_recall_before": 0.0,
+   "seen_wording_recall_before": 1.0
+  },
+  "verify_seconds": 98.98059177398682
+ }
+]

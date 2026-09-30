@@ -1,0 +1,181 @@
+[
+ {
+  "arm": "dense_8x",
+  "flags": "",
+  "params_total": 69484032,
+  "params_on_accelerator_without_pool_values": 69484032,
+  "train_seconds": 3546.353202342987,
+  "history": [
+   {
+    "step": 10000,
+    "ce": 4.066577196121216,
+    "acc": 0.308807373046875
+   },
+   {
+    "step": 20000,
+    "ce": 3.8110811710357666,
+    "acc": 0.337066650390625
+   },
+   {
+    "step": 30000,
+    "ce": 3.7146869897842407,
+    "acc": 0.346405029296875
+   },
+   {
+    "step": 40000,
+    "ce": 3.633390784263611,
+    "acc": 0.3541259765625
+   },
+   {
+    "step": 50000,
+    "ce": 3.5791767239570618,
+    "acc": 0.359527587890625
+   },
+   {
+    "step": 60000,
+    "ce": 3.5302777886390686,
+    "acc": 0.36431884765625
+   },
+   {
+    "step": 70000,
+    "ce": 3.49269437789917,
+    "acc": 0.368865966796875
+   },
+   {
+    "step": 80000,
+    "ce": 3.454774856567383,
+    "acc": 0.37103271484375
+   },
+   {
+    "step": 90000,
+    "ce": 3.4186151027679443,
+    "acc": 0.377227783203125
+   },
+   {
+    "step": 100000,
+    "ce": 3.395412802696228,
+    "acc": 0.37701416015625
+   },
+   {
+    "step": 110000,
+    "ce": 3.3790712356567383,
+    "acc": 0.381805419921875
+   },
+   {
+    "step": 120000,
+    "ce": 3.3680189847946167,
+    "acc": 0.3843994140625
+   }
+  ],
+  "recall": {
+   "A_trained/seen_wording": {
+    "items": 80000,
+    "normal": 0.9608,
+    "normal_logprob": -0.1749000996351242,
+    "by_relation": {
+     "born": 0.96555,
+     "job": 0.96555,
+     "study": 0.9399,
+     "food": 0.9722
+    }
+   },
+   "A_trained/new_wording": {
+    "items": 16000,
+    "normal": 0.0093125,
+    "normal_logprob": -8.179421424865723,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.03525,
+     "study": 0.002,
+     "food": 0.0
+    }
+   },
+   "B_never_seen/seen_wording": {
+    "items": 12000,
+    "normal": 0.034083333333333334,
+    "normal_logprob": -7.902015686035156,
+    "by_relation": {
+     "born": 0.02033333333333333,
+     "job": 0.06733333333333333,
+     "study": 0.026,
+     "food": 0.02266666666666667
+    }
+   },
+   "B_never_seen/new_wording": {
+    "items": 2400,
+    "normal": 0.007916666666666667,
+    "normal_logprob": -8.236279487609863,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.03,
+     "study": 0.0016666666666666668,
+     "food": 0.0
+    }
+   }
+  },
+  "reliance": {
+   "loss": {
+    "web_heldout": {
+     "normal": 3.142976552248001,
+     "normal_ppl": 23.172739175733106
+    },
+    "bios_known_people": {
+     "normal": 0.24334514699876308,
+     "normal_ppl": 1.2755087861832293
+    },
+    "bios_unknown_people": {
+     "normal": 1.454053372144699,
+     "normal_ppl": 4.280429573274427
+    }
+   },
+   "greedy_born_in": {
+    "normal": {
+     "correct": 0.975,
+     "samples": [
+      {
+       "name": "Zoclevel Pimzimfen",
+       "truth": "Recife",
+       "generated": "Recife. Z"
+      },
+      {
+       "name": "Lumyar Velrashal",
+       "truth": "Perth",
+       "generated": "Perth. L"
+      },
+      {
+       "name": "Oskul Fendru",
+       "truth": "Hanoi",
+       "generated": "Hanoi."
+      },
+      {
+       "name": "Zosil Braro",
+       "truth": "Minsk",
+       "generated": "Minsk."
+      },
+      {
+       "name": "Vekcle Silgorquel",
+       "truth": "Leeds",
+       "generated": "Leeds."
+      },
+      {
+       "name": "Velul Torwenwen",
+       "truth": "Tunis",
+       "generated": "Tunis."
+      },
+      {
+       "name": "Torraslum Dovbra",
+       "truth": "Leeds",
+       "generated": "Leeds."
+      },
+      {
+       "name": "Isdovlum Lumzimwen",
+       "truth": "Dakar",
+       "generated": "Dakar."
+      }
+     ]
+    }
+   }
+  },
+  "verify_seconds": 18.282946825027466
+ }
+]
