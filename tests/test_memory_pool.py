@@ -74,6 +74,37 @@ def test_pallas_top_k_matches_lax_top_k():
     assert topk_pallas.supported(512, 16) and not topk_pallas.supported(16, 4)
 
 
+@pytest.mark.skipif(jax.default_backend() != "tpu", reason="Pallas TPU kernel")
+def test_fused_router_matches_xla():
+    from memory_pool_model import router_pallas as rp
+    G, M, n, d, k = 4, 300, 128, 16, 4
+    kq, kk, kn, kw1, kw2 = jax.random.split(jax.random.PRNGKey(0), 5)
+    nrm = lambda x: x / jnp.linalg.norm(x, axis=-1, keepdims=True)
+    q, keys = nrm(jax.random.normal(kq, (G, M, d))), nrm(jax.random.normal(kk, (G, n, d)))
+    t, noise = jnp.float32(12.0), 0.1 * jax.random.gumbel(kn, (G, M, n))
+    w1, w2 = jax.random.normal(kw1, (G, M, k)), jax.random.normal(kw2, (G, n))
+
+    def ref(q, keys, t):
+        cos = jnp.einsum("gmd,gnd->gmn", q, keys)
+        scores = cos * t
+        sel_vals, idx = jax.lax.top_k(jax.lax.stop_gradient(scores + noise), k)
+        kth = jax.lax.top_k(jax.lax.stop_gradient(scores), k)[0][..., -1:]
+        sub = jnp.take_along_axis(scores, idx, -1)
+        return idx, sub, sel_vals, (scores >= kth).sum(1), jax.nn.softmax(cos * jax.lax.stop_gradient(t), -1).sum(1)
+
+    with jax.default_matmul_precision("highest"):
+        a = rp.fused_router(q, keys, t, noise, k, True)
+        b = ref(q, keys, t)
+        np.testing.assert_array_equal(a[0], b[0])
+        for x, y in zip(a[1:5], b[1:5]):
+            np.testing.assert_allclose(x, y, rtol=1e-5, atol=1e-5)
+        loss = lambda o: jnp.sum(o[1] * w1) + jnp.sum(o[4] * w2)
+        ga = jax.grad(lambda *a: loss(rp.fused_router(*a, noise, k, True)), argnums=(0, 1, 2))(q, keys, t)
+        gb = jax.grad(lambda *a: loss(ref(*a)), argnums=(0, 1, 2))(q, keys, t)
+        for x, y in zip(ga, gb):
+            np.testing.assert_allclose(x, y, rtol=1e-4, atol=1e-5)
+
+
 def test_onehot_take_matches_gather_and_its_gradient():
     from memory_pool_model.memory import _onehot_take, _onehot_take_diff
     x = jax.random.normal(jax.random.PRNGKey(0), (3, 4, 2, 32))

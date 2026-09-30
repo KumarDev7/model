@@ -76,6 +76,32 @@ def _pallas_top_k_ok() -> bool:
     return ok
 
 
+@functools.lru_cache(maxsize=None)
+def _fused_router_ok() -> bool:
+    """Whether to use the fused Pallas router (router_pallas.py): opt-in with
+    MEMPOOL_FUSED_ROUTER=1 on TPU, and only if the kernel compiles (probed
+    once). It is exact but not yet faster: v5e, d512 x 6 pool, top-8, a
+    training step takes 56.4 ms with it and 53.2 ms with the XLA router."""
+    if os.environ.get("MEMPOOL_FUSED_ROUTER", "0") != "1" or not _pallas_top_k_ok():
+        return False
+
+    def probe():
+        from . import router_pallas
+
+        q = jnp.ones((2, 8, 8), jnp.float32) / jnp.sqrt(8.0)
+        keys = jnp.eye(128, 8, dtype=jnp.float32)[None].repeat(2, 0)
+        idx = router_pallas.fused_router(q, keys, jnp.float32(1.0), None, 2, True)[0]
+        return bool(jnp.all(idx[..., 0] < 8))
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(1) as ex:
+            ok = ex.submit(probe).result()
+    except Exception as e:  # noqa: BLE001
+        warnings.warn(f"fused Pallas router unavailable, using the XLA router: {type(e).__name__}: {str(e)[:200]}")
+        return False
+    return ok
+
+
 def _top_k(x: jax.Array, k: int) -> Tuple[jax.Array, jax.Array]:
     """Top-k over the last axis, always on a 2-D view (lax.top_k on N-D
     inputs was 7x slower on TPU). TPU: a Pallas kernel (topk_pallas.py) when
@@ -240,21 +266,39 @@ class MemoryPool(nn.Module):
         # reshape alone, plus slower elementwise passes).
         M = q.shape[0]
         G = 2 * H
-        cos = jnp.einsum("mgd,gnd->mgn", q.reshape(M, G, half), keys.reshape(G, n, half))
-        scores = cos * temperature
-        if self.query_scale:
-            scores = scores * q_len.reshape(M, G, 1)
+        noisy = train and self.routing_noise > 0
+        fused = None
+        if (not self.query_scale and not self.balance_temperature_grad and _fused_router_ok()):
+            from . import router_pallas
 
-        # Noise only changes *which* slots are selected, never their weights.
-        if train and self.routing_noise > 0:
-            gumbel = jax.random.gumbel(self.make_rng("routing"), scores.shape)
-            select_scores = scores + self.routing_noise * noise_scale * gumbel
-        else:
-            select_scores = scores
+            if router_pallas.supported(n, k, M):
+                # Stage 1 in one Pallas kernel: the [M, G, n] scores never
+                # leave VMEM (see router_pallas.py).
+                noise = None
+                if noisy:
+                    noise = (self.routing_noise * noise_scale) * jax.random.gumbel(
+                        self.make_rng("routing"), (G, M, n))
+                idx_t, sub_t, sel_t, member_sum, p_sum, agree = router_pallas.fused_router(
+                    q.reshape(M, G, half).transpose(1, 0, 2), keys.reshape(G, n, half), temperature, noise,
+                    k, self.balance_on_clean_picks)
+                sub_idx_g, sub_scores_g, sel_vals_g = (x.transpose(1, 0, 2) for x in (idx_t, sub_t, sel_t))
+                fused = (member_sum, p_sum, agree)
+        if fused is None:
+            cos = jnp.einsum("mgd,gnd->mgn", q.reshape(M, G, half), keys.reshape(G, n, half))
+            scores = cos * temperature
+            if self.query_scale:
+                scores = scores * q_len.reshape(M, G, 1)
 
-        # Stage 1: top-k sub-keys for each half.
-        sel_vals_g, sub_idx_g = _top_k(select_scores, k)  # [M, G, k]
-        sub_scores_g = take_last(scores, sub_idx_g)  # differentiable
+            # Noise only changes *which* slots are selected, never their weights.
+            if noisy:
+                gumbel = jax.random.gumbel(self.make_rng("routing"), scores.shape)
+                select_scores = scores + self.routing_noise * noise_scale * gumbel
+            else:
+                select_scores = scores
+
+            # Stage 1: top-k sub-keys for each half.
+            sel_vals_g, sub_idx_g = _top_k(select_scores, k)  # [M, G, k]
+            sub_scores_g = take_last(scores, sub_idx_g)  # differentiable
         sub_idx = sub_idx_g.reshape(M, H, 2, k)
         sub_scores = sub_scores_g.reshape(M, H, 2, k)
         sub_select = sel_vals_g.reshape(M, H, 2, k)  # = select_scores at sub_idx (selection only)
@@ -315,28 +359,39 @@ class MemoryPool(nn.Module):
         # balance_on_clean_picks=False reuses the training picks instead and
         # skips a second sub-key top-k per layer (small noise barely changes
         # them); pick_agreement is then not measured (NaN).
-        clean = select_scores is scores or not self.balance_on_clean_picks
-        if clean:
-            member = select_scores >= sel_vals_g[..., -1:]  # [M, G, n]
+        if fused is not None:
+            member_sum, p_sum, agree = fused
+            f = jax.lax.stop_gradient(member_sum / (M * k)).reshape(H, 2, n)
+            P = (p_sum / M).reshape(H, 2, n)
+            if not noisy:
+                pick_agreement = jnp.ones((), jnp.float32)
+            elif not self.balance_on_clean_picks:
+                pick_agreement = jnp.full((), jnp.nan, jnp.float32)
+            else:
+                pick_agreement = agree / (M * G * k)
         else:
-            clean_vals = _top_k(scores, k)[0]  # [M, G, k]
-            member = scores >= clean_vals[..., -1:]
-        # exact up to ties at the k-th score (a zero-probability event for
-        # float scores), in which case a tied sub-key is counted too
-        f = jax.lax.stop_gradient(jnp.sum(member, axis=0, dtype=jnp.float32) / (M * k)).reshape(H, 2, n)
-        # Share of the noisy sub-key picks that the clean router also makes.
-        # Near 0 means the noise, not the router, decides what training reads
-        # (Ultra-FineWeb, 512 sub-keys, routing_noise 1.0: 0.4% of the slots
-        # read in training were the slots inference reads).
-        if select_scores is scores:
-            pick_agreement = jnp.ones((), jnp.float32)
-        elif clean:
-            pick_agreement = jnp.full((), jnp.nan, jnp.float32)
-        else:
-            pick_agreement = jnp.mean(sub_scores_g >= clean_vals[..., -1:])
-        # P: mean router probability for each sub-key (differentiable).
-        p_scores = scores if self.balance_temperature_grad else cos * jax.lax.stop_gradient(temperature)
-        P = jax.nn.softmax(p_scores, axis=-1).mean(axis=0).reshape(H, 2, n)
+            clean = select_scores is scores or not self.balance_on_clean_picks
+            if clean:
+                member = select_scores >= sel_vals_g[..., -1:]  # [M, G, n]
+            else:
+                clean_vals = _top_k(scores, k)[0]  # [M, G, k]
+                member = scores >= clean_vals[..., -1:]
+            # exact up to ties at the k-th score (a zero-probability event for
+            # float scores), in which case a tied sub-key is counted too
+            f = jax.lax.stop_gradient(jnp.sum(member, axis=0, dtype=jnp.float32) / (M * k)).reshape(H, 2, n)
+            # Share of the noisy sub-key picks that the clean router also makes.
+            # Near 0 means the noise, not the router, decides what training reads
+            # (Ultra-FineWeb, 512 sub-keys, routing_noise 1.0: 0.4% of the slots
+            # read in training were the slots inference reads).
+            if select_scores is scores:
+                pick_agreement = jnp.ones((), jnp.float32)
+            elif clean:
+                pick_agreement = jnp.full((), jnp.nan, jnp.float32)
+            else:
+                pick_agreement = jnp.mean(sub_scores_g >= clean_vals[..., -1:])
+            # P: mean router probability for each sub-key (differentiable).
+            p_scores = scores if self.balance_temperature_grad else cos * jax.lax.stop_gradient(temperature)
+            P = jax.nn.softmax(p_scores, axis=-1).mean(axis=0).reshape(H, 2, n)
         # Equals 1 when routing is perfectly uniform; grows with collapse.
         balance_loss = n * jnp.mean(jnp.sum(f * P, axis=-1))
 
