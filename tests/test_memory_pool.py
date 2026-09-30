@@ -787,3 +787,59 @@ def test_fp16_loss_scaling_skips_overflow():
     s2, m, _ = tr.train_step(s1.replace(loss_scale=jnp.asarray(1024.0, jnp.float32)),
                              ds.sample(np.random.default_rng(1), 16), jax.random.PRNGKey(1))
     assert float(m["skipped_step"]) == 0.0 and np.isfinite(float(m["loss"]))
+
+
+# ---- pool sharded by rows across devices ----
+@pytest.mark.parametrize("n_dev", [2, 4])
+def test_sharded_pool_matches_single_device(n_dev):
+    """Runs in a subprocess with n_dev virtual CPU devices."""
+    import subprocess, sys, textwrap
+    code = textwrap.dedent("""
+        import jax, numpy as np
+        from jax.sharding import Mesh
+        from memory_pool_model.config import ModelConfig, TrainConfig
+        from memory_pool_model.data import FactDataset
+        from memory_pool_model.train import Trainer
+        N_DEV = int("NDEV")
+        assert jax.device_count() == N_DEV
+        ds = FactDataset(num_entities=64, num_relations=2, num_attributes=16, name_alphabet=8, name_len=2, facts_per_seq=4)
+        mcfg = ModelConfig(vocab_size=ds.vocab_size, max_len=ds.seq_len, d_model=32, n_heads=2,
+                           n_sub_keys=8, pool_heads=2, d_key=16, d_value=32, top_k=4, routing_noise=0.0)
+        out = []
+        for sharded in (False, True):
+            tcfg = TrainConfig(steps=10, batch_size=16, warmup_steps=2, pool_sharding=sharded,
+                               pool_shard_capacity=float(N_DEV))  # buckets can hold every read
+            mesh = Mesh(np.array(jax.devices()), ("data",)) if sharded else None
+            tr = Trainer(mcfg, tcfg, mesh=mesh)
+            assert tr.pool_sharded == sharded
+            st = tr.place_state(tr.init(jax.random.PRNGKey(0)))
+            if sharded:  # each device holds only its own rows
+                shard = st.params["pool"]["values"].addressable_shards[0].data
+                assert shard.shape[0] == mcfg.pool_size // N_DEV, shard.shape
+            rng = np.random.default_rng(0)
+            for i in range(5):
+                st, m, _ = tr.train_step(st, tr.place_batch(ds.sample(rng, 16)), jax.random.PRNGKey(i))
+            if sharded:
+                assert float(m["shard_dropped"]) == 0.0
+                assert st.params["pool"]["values"].addressable_shards[0].data.shape[0] == mcfg.pool_size // N_DEV
+            out.append((float(m["loss"]), jax.device_get(st)))
+        assert abs(out[0][0] - out[1][0]) < 1e-4, (out[0][0], out[1][0])
+        # key biases have an exactly-zero true gradient (see the data-parallel test)
+        for (path, a), b in zip(jax.tree_util.tree_flatten_with_path(out[0][1])[0],
+                                jax.tree_util.tree_leaves(out[1][1])):
+            if "'key']['bias'" in jax.tree_util.keystr(path):
+                continue
+            np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=2e-3, atol=2e-5,
+                                       err_msg=jax.tree_util.keystr(path))
+        # a tiny capacity drops reads, logs them and still trains
+        tr = Trainer(mcfg, TrainConfig(batch_size=16, warmup_steps=2, pool_sharding=True, pool_shard_capacity=0.01),
+                     mesh=Mesh(np.array(jax.devices()), ("data",)))
+        st = tr.place_state(tr.init(jax.random.PRNGKey(0)))
+        st, m, _ = tr.train_step(st, tr.place_batch(ds.sample(np.random.default_rng(0), 16)), jax.random.PRNGKey(0))
+        assert float(m["shard_dropped"]) > 0 and np.isfinite(float(m["loss"]))
+        print("OK")
+    """).replace("NDEV", str(n_dev))
+    env = {**__import__("os").environ, "XLA_FLAGS": f"--xla_force_host_platform_device_count={n_dev}",
+           "JAX_PLATFORMS": "cpu"}
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=900)
+    assert r.returncode == 0 and "OK" in r.stdout, r.stdout[-3000:] + r.stderr[-6000:]

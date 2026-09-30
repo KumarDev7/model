@@ -241,6 +241,16 @@ class Trainer:
             mcfg = dataclasses.replace(mcfg, host_pool=self.host.name)
         elif mcfg.pool_location != "device":
             raise ValueError(f"unknown pool_location {mcfg.pool_location!r}")
+        self.pool_sharded = bool(tcfg.pool_sharding and mcfg.use_memory and mesh is not None)
+        if self.pool_sharded:
+            from . import sharded_pool
+
+            if self.host is not None or not tcfg.sparse_pool_updates:
+                raise ValueError("pool_sharding needs a device pool with sparse_pool_updates")
+            n_dev = mesh.shape["data"]
+            if mcfg.pool_size % n_dev:
+                raise ValueError(f"pool size {mcfg.pool_size} is not divisible by {n_dev} devices")
+            mcfg = dataclasses.replace(mcfg, pool_mesh=sharded_pool.register(mesh, tcfg.pool_shard_capacity))
         self.mcfg, self.tcfg = mcfg, tcfg
         self.model = MemoryPoolLM(mcfg)
         self.sparse = mcfg.use_memory and tcfg.sparse_pool_updates
@@ -254,7 +264,8 @@ class Trainer:
             raise ValueError("pool_row_grads='dense' needs the pool on the device")
         want_dense = tcfg.pool_row_grads == "dense" or (
             tcfg.pool_row_grads == "auto" and jax.default_backend() == "tpu")
-        self.dense_row_grads = self.sparse and dense_ok and want_dense
+        # the sharded pool always uses the masked dense update on its own rows
+        self.dense_row_grads = self.sparse and dense_ok and (want_dense or self.pool_sharded)
         self.schedule = make_schedule(tcfg)
         self.optimizer = make_optimizer(tcfg, clip=not self.sparse)
         self.mesh = mesh
@@ -264,7 +275,10 @@ class Trainer:
 
             self.replicated = NamedSharding(mesh, PartitionSpec())
             self.batch_sharding = NamedSharding(mesh, PartitionSpec("data"))
-            extra = {"out_shardings": self.replicated}
+            self.row_sharding = NamedSharding(mesh, PartitionSpec("data"))
+            # a sharded pool keeps its layout through each step (constrained
+            # inside the step); otherwise every output is replicated
+            extra = {} if self.pool_sharded else {"out_shardings": self.replicated}
         self._jit_step = jax.jit(
             self._train_step,
             static_argnames=("route", "nopool", "freeze"),
@@ -294,8 +308,25 @@ class Trainer:
         return state, metrics, queries
 
     # ------------------------------------------------------------ placement
+    def state_shardings(self, state):
+        """Replicated everywhere, except the pool values and their optimizer
+        moments, which are sharded by rows when pool_sharding is on."""
+        def pick(path, x):
+            keys = [getattr(p, "key", getattr(p, "name", None)) for p in path]
+            is_pool_row = self.pool_sharded and getattr(x, "ndim", 0) >= 1 and (
+                keys[:3] == ["params", "pool", "values"] or keys[:1] in (["pool_m"], ["pool_v"]))
+            if is_pool_row and x.shape[0] == self.mcfg.pool_size:
+                return self.row_sharding
+            return self.replicated
+        return jax.tree_util.tree_map_with_path(pick, state)
+
+    def _constrain(self, state):
+        if not self.pool_sharded:
+            return state
+        return jax.lax.with_sharding_constraint(state, self.state_shardings(state))
+
     def place_state(self, state):
-        return jax.device_put(state, self.replicated) if self.mesh is not None else state
+        return jax.device_put(state, self.state_shardings(state)) if self.mesh is not None else state
 
     def place_batch(self, batch):
         if self.mesh is None:
@@ -432,7 +463,15 @@ class Trainer:
                 g_rest = jax.tree_util.tree_map(lambda g: jnp.where(finite, g, 0.0), g_rest)
                 g_probe = jax.tree_util.tree_map(lambda g: jnp.where(finite, g, 0.0), g_probe)
             dense_rows = self.dense_row_grads
-            if dense_rows:
+            if self.pool_sharded:
+                from . import sharded_pool
+
+                # [N, D] sharded by rows: each device holds its own rows' gradient
+                g_rows = sharded_pool.row_grads(self.mcfg.pool_mesh, self.mcfg.pool_size, aux["slots"],
+                                                aux["weights"], [g_probe[i] for i in layers])
+                touched = jnp.any(g_rows != 0, axis=-1)
+                metrics["shard_dropped"] = aux["shard_dropped"]
+            elif dense_rows:
                 # g_rows: [N, D], zero outside the fetched rows `touched`
                 g_rows = fetched_row_grads_dense(aux, g_probe, layers, self.mcfg.pool_size)
                 # Lazy Adam updates the rows with a nonzero gradient this step
@@ -581,7 +620,7 @@ class Trainer:
             loss_scale=loss_scale,
             good_steps=good_steps,
         )
-        return new_state, metrics, queries
+        return self._constrain(new_state), metrics, queries
 
     # --------------------------------------------------------------- revive
     def _revive(self, state: TrainState, queries, rng):
@@ -610,7 +649,7 @@ class Trainer:
             transform_non_params=lambda x: x,
         )
         new_state = state.replace(params=params, opt_state=opt_state, subkey_usage=new_usage)
-        return new_state, dead.sum()
+        return self._constrain(new_state), dead.sum()
 
     # ----------------------------------------------------------------- eval
     def _eval_step(self, params, batch):

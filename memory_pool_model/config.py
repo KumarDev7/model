@@ -31,6 +31,9 @@ class ModelConfig:
     pool_dir: str = ""
     # Filled in by the Trainer: registry name of the HostPool (host mode).
     host_pool: str = ""
+    # Filled in by the Trainer: registry name of the mesh of a row-sharded
+    # pool (TrainConfig.pool_sharding).
+    pool_mesh: str = ""
     # Product-key pool: the pool has n_sub_keys**2 trainable value slots.
     n_sub_keys: int = 64
     # Independent router heads; each head fetches `top_k` slots.
@@ -166,6 +169,13 @@ class TrainConfig:
     # (host pools, very large pools). "auto": dense for a device pool on TPU
     # (one v5e: 19 + 2 ms vs 32 ms per step), unique elsewhere.
     pool_row_grads: str = "auto"
+    # With data_parallel: shard the pool values (and their Adam moments) by
+    # rows across the devices instead of replicating them; only the rows read
+    # move between devices (sharded_pool.py). Buckets hold capacity x the
+    # average reads per device pair; overflowing reads are dropped and logged
+    # (shard_dropped).
+    pool_sharding: bool = False
+    pool_shard_capacity: float = 2.0
     # Split each batch across all local devices (data parallel).
     data_parallel: bool = False
     # Save a resumable checkpoint every N steps (0 = only at the end).

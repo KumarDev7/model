@@ -86,6 +86,7 @@ class MemoryPoolLM(nn.Module):
                 host_pool=cfg.host_pool,
                 value_init_scale=cfg.value_init_scale,
                 balance_on_clean_picks=cfg.balance_on_clean_picks,
+                pool_mesh=cfg.pool_mesh,
                 name="pool",
             )
 
@@ -154,4 +155,5 @@ def merge_layer_aux(layer_aux: List[Dict[str, Any]]) -> Dict[str, Any]:
         "top1_weight": jnp.mean(jnp.stack([a["top1_weight"] for a in layer_aux])),
         # noisy training sub-key picks that the clean router also makes (1 = noise off)
         "pick_agreement": jnp.mean(jnp.stack([a["pick_agreement"] for a in layer_aux])),
+        "shard_dropped": sum(a["shard_dropped"] for a in layer_aux),
     }

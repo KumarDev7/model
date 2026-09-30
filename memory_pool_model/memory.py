@@ -204,6 +204,9 @@ class MemoryPool(nn.Module):
     value_init_scale: float = 1.0
     # Balance-loss usage from noise-free picks (costs a second top-k per layer).
     balance_on_clean_picks: bool = True
+    # Name of a registered sharded_pool mesh: the value table is sharded by
+    # rows over its data axis and training reads go through an all-to-all.
+    pool_mesh: str = ""
 
     def setup(self):
         assert self.d_key % 2 == 0, "d_key must be even (split into two halves)"
@@ -317,10 +320,16 @@ class MemoryPool(nn.Module):
         # Fetch and mix knowledge vectors; heads are summed.
         weights = jax.nn.softmax(slot_scores, axis=-1)
         read_slots = (slots + self.pool_size // 2 + 1) % self.pool_size if shuffle_reads else slots
+        shard_dropped = jnp.zeros((), jnp.float32)
         if self.host_pool:
             from . import host_pool as hp
 
             fetched = hp.fetch(self.host_pool, read_slots, self.d_value)  # [M, H, k, d_value]
+        elif self.pool_mesh and train:
+            from . import sharded_pool
+
+            values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
+            fetched, shard_dropped = sharded_pool.fetch(self.pool_mesh, values, read_slots)
         else:
             values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
             fetched = jnp.take(values, read_slots, axis=0)  # [M, H, k, d_value]
@@ -405,6 +414,8 @@ class MemoryPool(nn.Module):
             "temperature": temperature,
             "top1_weight": jax.lax.stop_gradient(weights.max(-1).mean()),
             "pick_agreement": jax.lax.stop_gradient(pick_agreement.astype(jnp.float32)),
+            # reads dropped by full buckets of the sharded pool (0 otherwise)
+            "shard_dropped": jax.lax.stop_gradient(shard_dropped),
         }
         return out, aux
 
