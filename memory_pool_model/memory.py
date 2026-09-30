@@ -135,6 +135,12 @@ def take_last(x: jax.Array, idx: jax.Array) -> jax.Array:
     return _onehot_take_diff(x, idx, x.shape[-1])
 
 
+def _count_ids(ids: jax.Array, n: int) -> jax.Array:
+    """ids [M, H, k] in [0, n) -> per-head counts [H, n] (one-hot sum, which
+    XLA fuses into a reduction; no scatter)."""
+    return jnp.sum(ids[..., None] == jnp.arange(n), axis=(0, 2), dtype=jnp.float32)
+
+
 def unit_sphere_init(key, shape, dtype=jnp.float32):
     return _l2_normalize(jax.random.normal(key, shape, dtype))
 
@@ -266,11 +272,14 @@ class MemoryPool(nn.Module):
         else:
             values = jax.lax.stop_gradient(self.values) if sparse_grad else self.values
             fetched = jnp.take(values, read_slots, axis=0)  # [M, H, k, d_value]
-            # Keep the gathered rows in row-major order. Otherwise XLA can
-            # pick a layout with d_value outermost to suit the consumer, and
-            # the gather then reads every row with scattered accesses (113 ms
-            # instead of ~8 ms per layer on a T4 at batch 32 x 256).
-            fetched = jax.lax.optimization_barrier(fetched.reshape(-1)).reshape(fetched.shape)
+            if jax.default_backend() == "gpu":
+                # Keep the gathered rows in row-major order. Otherwise XLA can
+                # pick a layout with d_value outermost to suit the consumer, and
+                # the gather then reads every row with scattered accesses (113 ms
+                # instead of ~8 ms per layer on a T4 at batch 32 x 256). On TPU
+                # the barrier costs a relayout copy of all fetched rows and stops
+                # XLA fusing the gather into the mix (v5e: 6.6 ms per step).
+                fetched = jax.lax.optimization_barrier(fetched.reshape(-1)).reshape(fetched.shape)
         out = jnp.einsum("mhk,mhkd->md", weights, fetched)
         out = out.reshape(*lead_shape, self.d_value)
 
@@ -280,11 +289,19 @@ class MemoryPool(nn.Module):
         # and the pool-wide slot counts are sums. Top-k memberships are
         # counted densely by comparing scores with the k-th largest.
         M = q.shape[0]
-        head_slots = (slots + jnp.arange(H)[None, :, None] * self.pool_size).reshape(-1)
-        head_counts = jnp.zeros((H * self.pool_size,), jnp.float32).at[head_slots].add(1.0).reshape(H, n, n)
-        # Sub-keys actually used by the final selection (for usage tracking).
-        subkey_counts = jnp.stack([head_counts.sum(2), head_counts.sum(1)], axis=1)  # [H, 2, n]
-        slot_counts = head_counts.sum(0).reshape(-1)
+        if train and jax.default_backend() == "tpu":
+            # Training on TPU: no scatter at all. Sub-key counts by a fused
+            # one-hot reduction (exact); per-slot counts are left out (None)
+            # and the trainer takes the touched rows from the row gradients
+            # (v5e: 3.5 ms per layer saved).
+            subkey_counts = jnp.stack([_count_ids(idx_a, n), _count_ids(idx_b, n)], axis=1)  # [H, 2, n]
+            slot_counts = None
+        else:
+            head_slots = (slots + jnp.arange(H)[None, :, None] * self.pool_size).reshape(-1)
+            head_counts = jnp.zeros((H * self.pool_size,), jnp.float32).at[head_slots].add(1.0).reshape(H, n, n)
+            # Sub-keys actually used by the final selection (for usage tracking).
+            subkey_counts = jnp.stack([head_counts.sum(2), head_counts.sum(1)], axis=1)  # [H, 2, n]
+            slot_counts = head_counts.sum(0).reshape(-1)
 
         # Load balancing is measured on the *clean* router so the noise can't
         # hide a collapse. f: fraction of top-k picks per sub-key (no grad).
@@ -319,7 +336,7 @@ class MemoryPool(nn.Module):
         aux = {
             "balance_loss": balance_loss,
             "subkey_counts": jax.lax.stop_gradient(subkey_counts),  # [H, 2, n]
-            "slot_counts": jax.lax.stop_gradient(slot_counts),  # [N]
+            "slot_counts": None if slot_counts is None else jax.lax.stop_gradient(slot_counts),  # [N]
             "queries": jax.lax.stop_gradient(q),  # [M, H, 2, half] (unit norm)
             "slots": slots.reshape(*lead_shape, H, k),
             "weights": weights.reshape(*lead_shape, H, k),

@@ -135,7 +135,9 @@ def merge_layer_aux(layer_aux: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "balance_loss": jnp.mean(jnp.stack([a["balance_loss"] for a in layer_aux])),
         "subkey_counts": sum(a["subkey_counts"] for a in layer_aux),
-        "slot_counts": sum(a["slot_counts"] for a in layer_aux),
+        # None when the pool skipped per-slot counting (TPU training)
+        "slot_counts": None if any(a["slot_counts"] is None for a in layer_aux)
+        else sum(a["slot_counts"] for a in layer_aux),
         # kept per layer: concatenating along the (batch-sharded) leading
         # axis forces an all-to-all under data parallelism
         "queries": [a["queries"] for a in layer_aux],

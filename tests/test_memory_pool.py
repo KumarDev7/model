@@ -87,6 +87,13 @@ def test_onehot_take_matches_gather_and_its_gradient():
     np.testing.assert_array_equal(_onehot_take(ints, idx[:, :, 0] % 16), jnp.take_along_axis(ints, idx[:, :, 0] % 16, -1))
 
 
+def test_count_ids_matches_scatter_counts():
+    from memory_pool_model.memory import _count_ids
+    ids = jax.random.randint(jax.random.PRNGKey(0), (50, 3, 4), 0, 16)
+    ref = jnp.zeros((3, 16)).at[jnp.arange(3)[None, :, None], ids].add(1.0)
+    np.testing.assert_array_equal(_count_ids(ids, 16), ref)
+
+
 def test_noise_changes_selection_only_in_training():
     pool, params, q = make_pool(noise=5.0)
     rngs = {"routing": jax.random.PRNGKey(3)}
@@ -117,7 +124,8 @@ def test_temperature_floor_and_balance_gradient():
 
     # the floor clamps the value but still passes gradient (no dead temperature)
     _, g_read, t = temp_grads({"min_temperature": 5.0}, jnp.log(2.0))
-    assert abs(t - 5.0) < 1e-4 and g_read != 0.0
+    # relative: TPU's exp is approximate (5.0 comes back as 5.000105)
+    assert abs(t - 5.0) < 5e-5 * 5.0 and g_read != 0.0
     # the balance loss can't lower its value by flattening the router
     g_bal, _, _ = temp_grads({"balance_temperature_grad": True}, jnp.log(10.0))
     assert g_bal != 0.0
@@ -509,6 +517,13 @@ def _host_pair(tmp_path=None, pool_optimizer="adam"):
 
 @pytest.mark.parametrize("pool_optimizer", ["adam", "rowwise_adagrad"])
 def test_host_pool_training_matches_device_pool(pool_optimizer):
+    # full-precision matmuls: TPU's default bf16 passes make two differently
+    # compiled steps differ by ~1e-3 in the loss
+    with jax.default_matmul_precision("highest"):
+        _host_pool_training_matches_device_pool(pool_optimizer)
+
+
+def _host_pool_training_matches_device_pool(pool_optimizer):
     ds, _, dev, host = _host_pair(pool_optimizer=pool_optimizer)
     s_dev = dev.init(jax.random.PRNGKey(0))
     s_host = host.init(jax.random.PRNGKey(0))

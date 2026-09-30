@@ -230,7 +230,7 @@ no-pool penalty).
    the frozen backbone then answers about B, it knows how to read new
    knowledge from the pool.
 
-## Speed: pool training step 3.6x faster on TPU
+## Speed: pool training step 4.5x faster on TPU
 
 Pool model above, one step, TPU v5e-1:
 
@@ -239,7 +239,8 @@ Pool model above, one step, TPU v5e-1:
 | before (argmax top-k, 3 usage scatters per layer, sort-based row gradients, `take_along_axis`) | 329 |
 | `lax.top_k`; one usage scatter per layer; dense scatter-add row gradients + masked lazy Adam | 252 |
 | routing-score gathers as fused one-hot reductions (forward and backward) | 117 |
-| Pallas top-k kernel | **92** |
+| Pallas top-k kernel | 92 |
+| no layout barrier on the fetched rows on TPU; no usage-count scatter in TPU training (JAX 0.11, v5e-8 chip) | **72** |
 
 Profiled with `jax.profiler` (per-op device time). The matmuls were never
 the cost: each `take_along_axis` over the [8192, 4, 2, 512] score tensor

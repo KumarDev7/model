@@ -226,7 +226,7 @@ TPU, `lax.top_k` had made the pool 27x slower than dense; the argmax top-k was
 used on every accelerator (superseded on TPU, see below). Full write-up:
 `docs/pool-fixes-report.md`.
 
-### TPU speed: 3.6x faster pool step
+### TPU speed: 4.5x faster pool step
 
 One training step of the knowledge-study pool model (d256 backbone, pool
 of 262,144 x 256 read in 2 layers, 4 heads x top-16, batch 32 x 256) on a
@@ -237,7 +237,8 @@ TPU v5e-1, JAX 0.7.2:
 | before | 329 ms |
 | `lax.top_k` instead of argmax rounds; one usage scatter per layer instead of three; row gradients by one dense scatter-add + masked lazy Adam instead of sort + segment-sum | 252 ms |
 | gathers of routing scores (`take_along_axis`) as fused one-hot reductions, forward and backward | 117 ms |
-| Pallas top-k kernel (`memory_pool_model/topk_pallas.py`) instead of XLA's sort-based top-k | **92 ms** |
+| Pallas top-k kernel (`memory_pool_model/topk_pallas.py`) instead of XLA's sort-based top-k | 92 ms |
+| no layout barrier on the fetched rows (GPU only now); no usage-count scatter in TPU training steps (sub-key counts by a fused one-hot sum, touched rows from the gradient) | **72 ms** (JAX 0.11) |
 
 The profile showed the time was not in the matmuls: TPU gathers along a
 short minor axis took 16.5 ms each (8 per step) and their scatter-add
@@ -245,7 +246,15 @@ gradients 10.8 ms; the one-hot form is 0.7 / 1.0 ms. XLA lowers `top_k` to
 a full sort (7.5 ms at 65k rows x 512, k=16); the Pallas kernel keeps a
 block of rows in VMEM and runs k rounds of max / lowest-index / mask-out
 (1.2 ms, exact, same tie order). What is left is mostly the pool rows'
-gradient scatter-add (2 x 9.3 ms) and row gathers (2 x 6.4 ms).
+gradient scatter-add (2 x 8 ms) and row gathers (2 x 6.4 ms): about one
+DMA per 1 KB row, which is the floor on v5e (a Pallas gather-and-mix kernel
+that DMAs rows straight into VMEM was exact but slower, 8.9 vs 7.2 ms). The
+d512 x 6 pool model (knowledge study) went from 96 to 80 ms per step with the
+last two changes.
+
+Lazy Adam updates the rows that received a nonzero gradient this step, on
+every path (device, host pool, data parallel). A row read only at a position
+no loss depends on (e.g. after the last scored token) is not updated.
 
 The kernel needs a `libtpu` that matches `jaxlib` (Colab's image shipped
 libtpu 0.0.21.1 with jax 0.7.2, which expects 0.0.23:

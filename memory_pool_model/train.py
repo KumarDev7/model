@@ -419,11 +419,16 @@ class Trainer:
             if dense_rows:
                 # g_rows: [N, D], zero outside the fetched rows `touched`
                 g_rows = fetched_row_grads_dense(aux, g_probe, layers, self.mcfg.pool_size)
-                touched = aux["slot_counts"] > 0
-            elif self.mesh is not None:
-                uniq, g_rows = fetched_row_grads_sharded(aux, g_probe, layers, self.mcfg.pool_size, self.mesh)
+                # Lazy Adam updates the rows with a nonzero gradient this step
+                # (every path). A row read only where no loss depends on the
+                # read (e.g. after the last scored token) gets no update.
+                touched = jnp.any(g_rows != 0, axis=-1)
             else:
-                uniq, g_rows = fetched_row_grads(aux, g_probe, layers, self.mcfg.pool_size)
+                if self.mesh is not None:
+                    uniq, g_rows = fetched_row_grads_sharded(aux, g_probe, layers, self.mcfg.pool_size, self.mesh)
+                else:
+                    uniq, g_rows = fetched_row_grads(aux, g_probe, layers, self.mcfg.pool_size)
+                uniq = jnp.where(jnp.any(g_rows != 0, axis=-1), uniq, self.mcfg.pool_size)
 
             # clip by the global norm of both parts together
             gnorm = jnp.sqrt(optax.tree.norm(g_rest) ** 2 + jnp.sum(g_rows**2))
@@ -499,7 +504,19 @@ class Trainer:
             sk = aux["subkey_counts"]
             sk = sk / sk.sum(axis=-1, keepdims=True)
             subkey_usage = d * subkey_usage + (1 - d) * sk
-            slot_usage = d * slot_usage + (1 - d) * aux["slot_counts"] / aux["slot_counts"].sum()
+            slot_counts = aux["slot_counts"]
+            if slot_counts is None:
+                # TPU training: the pool skipped its count scatter, so the
+                # slot statistics count the rows updated this step, not reads
+                if self.sparse and self.dense_row_grads:
+                    slot_counts = touched.astype(jnp.float32)
+                elif self.sparse:
+                    slot_counts = jnp.zeros((self.mcfg.pool_size,), jnp.float32).at[uniq].set(1.0, mode="drop")
+                else:
+                    slot_counts = jnp.zeros((self.mcfg.pool_size,), jnp.float32).at[
+                        jnp.concatenate([s.reshape(-1) for s in aux["slots"]])].add(1.0)
+            aux = {**aux, "slot_counts": slot_counts}
+            slot_usage = d * slot_usage + (1 - d) * slot_counts / slot_counts.sum()
             # Revival sample: the same random positions from every sequence
             # and layer. Indexing the (unsharded) time axis and stacking layers
             # on a new axis keeps it local to each device under data parallelism.
