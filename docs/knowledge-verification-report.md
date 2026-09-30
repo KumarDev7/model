@@ -452,3 +452,24 @@ people per group (`experiments/inference_robustness.py`,
   trained with loses knowledge fast. The engine should read exactly what the
   model was trained for; to read fewer, train with fewer (8 per head in
   training reached the same recall as 16 in the earlier runs).
+
+### Seed 2 and multi-GPU scaling (2x T4)
+
+Q/A on bio-only people, float32, three seeds: pool 92.5 / 90.9 / 91.1%, dense
+84.8 / 84.0 / 86.2%; with the pool reads shuffled 0.3-1.2%. On the same
+machine and data, float32 seed 2 gives pool 91.1% / dense 86.2% and float16
+gives 92.7% / 87.4%, so float16 training is confirmed.
+
+Data parallel, d512 x 6, float16, 32 sequences of 256 tokens per GPU:
+
+| model | 1 GPU | 2 GPUs | speed-up |
+|---|---|---|---|
+| dense | 59,972 tok/s | 107,566 tok/s | 1.79x |
+| pool, sort-based row gradients | 32,715 tok/s | 44,237 tok/s | 1.35x |
+| pool, dense row gradients (one all-reduce) | 34,212 tok/s | 42,383 tok/s | 1.24x |
+
+The pool scales poorly because it is replicated: every step the devices
+exchange the gradients of all rows read (or the whole table). Before a large
+multi-device run the pool should be sharded by rows across devices (each
+device owns a slice, reads are sent to the owner, only owned rows are
+updated), which also lifts the one-device limit on pool size.

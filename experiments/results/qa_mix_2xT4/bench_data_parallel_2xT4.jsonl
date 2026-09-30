@@ -1,0 +1,6 @@
+{"model": "dense", "row_grads": "auto", "gpus": 1, "ms_per_step": 136.6, "tokens_per_s": 59972}
+{"model": "pool", "row_grads": "unique", "gpus": 1, "ms_per_step": 250.4, "tokens_per_s": 32715}
+{"model": "pool", "row_grads": "dense", "gpus": 1, "ms_per_step": 239.4, "tokens_per_s": 34212}
+{"model": "dense", "row_grads": "auto", "gpus": 2, "ms_per_step": 152.3, "tokens_per_s": 107566}
+{"model": "pool", "row_grads": "unique", "gpus": 2, "ms_per_step": 370.4, "tokens_per_s": 44237}
+{"model": "pool", "row_grads": "dense", "gpus": 2, "ms_per_step": 386.6, "tokens_per_s": 42383}
