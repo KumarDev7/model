@@ -421,3 +421,34 @@ scale grew from 2^15 to 2^17-2^18. (The float16 runs are on a separate
 machine whose tokenizer came out slightly different, so the dense 87.4% is
 not a like-for-like gain.)
 
+
+### Inference shortcuts for a low-memory engine
+
+The float16-trained pool model (trained reading 16 vectors per head) with the
+pool stored in lower precision, or with fewer vectors read at inference; 300
+people per group (`experiments/inference_robustness.py`,
+`experiments/results/qa_mix_2xT4/inference_robustness_pool_4x_fp16.json`).
+
+| pool storage | bytes per vector (256 dims) | bio recall | Q/A, bio-only people | held-out loss |
+|---|---|---|---|---|
+| float32 | 1024 | 91.9% | 92.7% | 4.3292 |
+| bfloat16 | 512 | 91.8% | 92.8% | 4.3292 |
+| float16 | 512 | 91.9% | 92.7% | 4.3293 |
+| **int8** (per-row scale) | 256 + 4 | 91.8% | 92.8% | 4.3292 |
+| int4 (per-row scale) | 128 + 4 | 91.6% | 91.9% | 4.3303 |
+
+| vectors read per head at inference (trained with 16) | bio recall | Q/A, bio-only people | held-out loss |
+|---|---|---|---|
+| 16 | 91.9% | 92.7% | 4.329 |
+| 8 | 89.5% | 87.7% | 4.370 |
+| 4 | 77.6% | 71.4% | 4.464 |
+| 2 | 50.6% | 44.4% | 4.669 |
+| 1 | 21.6% | 17.3% | 5.036 |
+
+* **int8 is lossless and int4 nearly so.** The 67M-parameter pool fits in
+  67 MB at int8 (34 MB at int4) instead of 268 MB, 4-8x less to store and
+  read from SSD per vector.
+* **Reads must match training.** Reading fewer vectors than the model was
+  trained with loses knowledge fast. The engine should read exactly what the
+  model was trained for; to read fewer, train with fewer (8 per head in
+  training reached the same recall as 16 in the earlier runs).
