@@ -407,3 +407,17 @@ are skipped). One T4:
 | dense | 425 ms | 121 ms (3.5x) |
 | pool, 8 reads per head | 517 ms | 226 ms (2.3x) |
 
+Quality check, Q/A mixed training (6,000 steps, d512 x 6, one T4 each):
+
+| | pool float32 (2 seeds) | pool float16 | dense float32 (2 seeds) | dense float16 |
+|---|---|---|---|---|
+| Q/A, people seen only in bios | 90.9-92.5% | 92.7% | 84.0-84.8% | 87.4% |
+| same, pool shuffled / removed | 0.3-1.0% / 0.8-3.3% | 1.2% / 2.2% | - | - |
+| held-out loss | 4.325-4.329 | 4.329 | 4.369-4.372 | 4.376 |
+| training time | ~65 min | ~31 min | ~46 min | ~16 min |
+
+float16 matches float32 within seed noise, with no skipped steps; the loss
+scale grew from 2^15 to 2^17-2^18. (The float16 runs are on a separate
+machine whose tokenizer came out slightly different, so the dense 87.4% is
+not a like-for-like gain.)
+
