@@ -331,3 +331,34 @@ container disk stalled it (95% I/O pressure, processes stuck in
 uninterruptible writes holding their TPU chips). Checkpoints now go to
 `/dev/shm` there.
 
+
+## Follow-up: recall through wordings never seen in training
+
+Quick test in the last minutes of the v5e-8 session (6,000 steps, 2,000
+people, one run per chip; recall on 300 people; results in
+`experiments/results/v5e8/gen/`). Two fixes: *diverse* data (bios from 25-37
+generated wordings per relation, possessive and Q/A forms included, the test
+wordings never generated) and *late routing* (read the pool only in the last
+layer, where the name has already been gathered).
+
+| model | data | seen wordings | **new wordings** | never-seen people (chance) |
+|---|---|---|---|---|
+| dense d256 | diverse | 5.9% | 1.9% | 2.1% |
+| pool d256 | diverse | 7.4% | 1.5% | 2.3% |
+| pool d256, late routing | 4 wordings / 10 / diverse | 15.6% / 6.1% / 4.0% | 0.8% / 2.0% / 1.0% | 2.2-3.0% |
+| dense d512 x 6 | diverse | 50.2% | 8.6% | 2.5% |
+| pool d512 x 6, late routing | diverse | 26.5% | 5.4% | 2.5% |
+| **pool d512 x 6** | diverse | **55.8%** | **14.8%** (0.0% with the pool shuffled) | 4.4% |
+
+* With the d512 backbone and diverse data, the pool model answers **15% of
+  facts through unseen wordings, 3.4x chance** (dense of the same size:
+  8.6%), and this recall also disappears when the pool reads are shuffled,
+  so it comes from the pool. That is the first above-chance transfer in
+  this study.
+* Late routing does not help; the d256 backbone does not transfer at all.
+* Not a fix yet: single runs, 6,000 steps, and there is no d512 pool run on
+  the 4-wording data at this scale to compare with (dense d512 there got
+  11.2%, so part of the effect may be model size). Next: the same arms with
+  2-3 seeds and long training, and Q/A-format training for half of the
+  people with Q/A tested on the other half (Allen-Zhu & Li's mixed
+  training).
