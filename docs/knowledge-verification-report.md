@@ -40,10 +40,11 @@ test that nothing in training optimises for agrees:
 
 **What is not solved:**
 
-* **Cost.** A pool step is ~4-5x a dense step of the same backbone (77-123
-  vs 23 ms on a v5e chip, after a 3.6x speed-up in this work); at equal
-  wall-clock the 2.4x wider dense model reaches the same recall with better
-  loss.
+* **Cost.** Measured alone on one v5e chip, a d512 x 6 step takes 8.3 ms
+  dense and 78 ms with the pool at 16 reads per head (53 ms at 8, which
+  keeps the recall), after a 4.5x speed-up of the pool step in this work.
+  The dense model with the same backbone reaches similar recall with 3x the
+  steps, so at equal wall-clock dense still wins.
 * **Generalisation to new wordings.** No model recalls facts through
   wordings it never saw in training (0.4-11%, pool no better than dense),
   also with 10 training wordings per relation.
@@ -133,10 +134,24 @@ relation (the 2 test wordings stay held out). 120,000 steps x 8,192 tokens
 | **pool_4x** (same backbone + pool) | 28.7M + 67M | **94.5%** | 0.2% / 0.4% | 2.1% | 3.1% | **92.5%** | **3.212** | 177 min |
 | dense_8x (d768, 8 layers) | 69.5M | 93.8% | - | 0.4% | 2.9% | 90.0% | 3.141 | 72 min |
 
-Still training when this was written (results to follow): a second seed of
-pool_4x, pool_4x without FFN in memory layers, pool_4x with 8 reads per
-head, dense_4x for 360k steps (pool_4x's wall-clock), and a d768 x 8 pair
-with and without the pool at 80k steps.
+Robustness and cost checks (same data and schedule unless noted):
+
+| model | params on accelerator | recall | shuffled / removed | greedy "born in" | held-out loss | train time |
+|---|---|---|---|---|---|---|
+| pool_4x, second seed | 28.7M + 67M | 95.0% | 0.0% / 0.1% | 85.0% | 3.208 | 193 min |
+| pool_4x, 8 reads per head (half the pool traffic) | 28.7M + 67M | 93.9% | 0.1% / 0.4% | 95.0% | 3.219 | 128 min |
+| pool_4x, no FFN in the memory layers | 24.5M + 67M | **95.9%** | 0.0% / 0.0% | 97.5% | 3.252 | 190 min |
+| dense_4x, 360k steps (3x the steps; ~pool_4x's wall-clock) | 27.4M | 92.4% | - | 95.0% | 3.209 | 95 min |
+| dense_8x, second seed | 69.5M | 92.4% | - | 90.0% | 3.146 | 72 min |
+| dense_8x, 80k steps | 69.5M | 85.2% | - | 85.0% | 3.201 | 48 min |
+
+<!-- PHASE8 -->
+
+The pool result is robust across seeds and variants (93.9-95.9%), and
+halving the reads per head costs almost nothing. It is a gain in *sample*
+efficiency: the dense model with the same backbone needs about 3x the steps
+(360k) to reach similar recall and loss. Converting that into a wall-clock
+win depends on the pool's step cost (next section).
 
 Recall over training (monitor snapshots from the resumable checkpoints,
 300 people): the dense model learns the facts late; the pool learns them
@@ -250,7 +265,27 @@ took 16.5 ms on TPU (8 such gathers per step) and its scatter gradient
 Pallas kernel (`memory_pool_model/topk_pallas.py`) keeps 256 rows in VMEM
 and runs k rounds of max / lowest index / mask (1.2 ms, bit-identical to
 `lax.top_k` including ties; 11x faster at width 1024). Left: the pool rows'
-gradient scatter-add (2 x 9.3 ms) and row gathers (2 x 6.4 ms).
+gradient scatter-add and row gathers.
+
+Later rounds (Kaggle v5e-8, JAX 0.11): on TPU the layout barrier on the
+fetched rows is dropped (it forced a relayout copy of all 537 MB per layer),
+the usage-count scatter is skipped in training steps (exact sub-key counts by
+a fused one-hot sum, touched rows from the gradients), and routing tensors
+are laid out as [tokens, 2 x heads, sub-keys]. d512 x 6 pool model:
+
+| | 16 reads per head | 8 reads per head | dense, same backbone |
+|---|---|---|---|
+| ms per step | 96 -> **78** | 56 -> **53** | 8.3 |
+
+Where the 53 ms go (8 reads per head): pool-row gradient scatter-add 9.1,
+row gathers 6.4, masked lazy Adam 3.9 (one DMA per 1 KB row: a Pallas
+gather-and-mix kernel that DMAs rows straight into VMEM was exact but slower,
+8.9 vs 7.2 ms per layer), router ~8 (memory-bound passes over the
+[tokens, 8, 512] score tensor: cosine einsum 3.0, top-k 2.4, one-hot takes
+2.6, temperature / noise / softmax statistics), backbone ~15. The next step
+is one fused Pallas router kernel (scores, noise, top-k, clean values,
+balance statistics in VMEM, with a hand-written backward for the softmax
+statistics); estimated 6-8 ms per step.
 
 ## Bugs and problems found and fixed
 

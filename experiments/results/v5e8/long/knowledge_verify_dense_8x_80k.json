@@ -1,0 +1,201 @@
+[
+ {
+  "arm": "dense_8x_80k",
+  "flags": "",
+  "params_total": 69484032,
+  "params_on_accelerator_without_pool_values": 69484032,
+  "train_seconds": 2886.694304704666,
+  "history": [
+   {
+    "step": 5000,
+    "ce": 4.181802064180374,
+    "acc": 0.297332763671875
+   },
+   {
+    "step": 10000,
+    "ce": 3.8416507840156555,
+    "acc": 0.33038330078125
+   },
+   {
+    "step": 15000,
+    "ce": 3.6864345371723175,
+    "acc": 0.346221923828125
+   },
+   {
+    "step": 20000,
+    "ce": 3.598080575466156,
+    "acc": 0.3554229736328125
+   },
+   {
+    "step": 25000,
+    "ce": 3.5248012244701385,
+    "acc": 0.363555908203125
+   },
+   {
+    "step": 30000,
+    "ce": 3.466405928134918,
+    "acc": 0.37017822265625
+   },
+   {
+    "step": 35000,
+    "ce": 3.4209021031856537,
+    "acc": 0.3757476806640625
+   },
+   {
+    "step": 40000,
+    "ce": 3.3713250756263733,
+    "acc": 0.3812103271484375
+   },
+   {
+    "step": 45000,
+    "ce": 3.3431015014648438,
+    "acc": 0.38427734375
+   },
+   {
+    "step": 50000,
+    "ce": 3.3046543896198273,
+    "acc": 0.3888092041015625
+   },
+   {
+    "step": 55000,
+    "ce": 3.281438708305359,
+    "acc": 0.3909149169921875
+   },
+   {
+    "step": 60000,
+    "ce": 3.257847636938095,
+    "acc": 0.39288330078125
+   },
+   {
+    "step": 65000,
+    "ce": 3.2341714799404144,
+    "acc": 0.3964080810546875
+   },
+   {
+    "step": 70000,
+    "ce": 3.2178003787994385,
+    "acc": 0.3972015380859375
+   },
+   {
+    "step": 75000,
+    "ce": 3.2090355157852173,
+    "acc": 0.3989410400390625
+   },
+   {
+    "step": 80000,
+    "ce": 3.2005568146705627,
+    "acc": 0.40045166015625
+   }
+  ],
+  "recall": {
+   "A_trained/seen_wording": {
+    "items": 80000,
+    "normal": 0.852125,
+    "normal_logprob": -0.5521553754806519,
+    "by_relation": {
+     "born": 0.83425,
+     "job": 0.8827,
+     "study": 0.84405,
+     "food": 0.8475
+    }
+   },
+   "A_trained/new_wording": {
+    "items": 16000,
+    "normal": 0.0083125,
+    "normal_logprob": -8.430047035217285,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.02825,
+     "study": 0.00225,
+     "food": 0.00275
+    }
+   },
+   "B_never_seen/seen_wording": {
+    "items": 12000,
+    "normal": 0.029833333333333333,
+    "normal_logprob": -7.069861888885498,
+    "by_relation": {
+     "born": 0.008333333333333333,
+     "job": 0.063,
+     "study": 0.030666666666666665,
+     "food": 0.017333333333333333
+    }
+   },
+   "B_never_seen/new_wording": {
+    "items": 2400,
+    "normal": 0.006666666666666667,
+    "normal_logprob": -8.50857925415039,
+    "by_relation": {
+     "born": 0.0,
+     "job": 0.02,
+     "study": 0.0016666666666666668,
+     "food": 0.005
+    }
+   }
+  },
+  "reliance": {
+   "loss": {
+    "web_heldout": {
+     "normal": 3.2005568146705627,
+     "normal_ppl": 24.546194073599533
+    },
+    "bios_known_people": {
+     "normal": 0.30588914826512337,
+     "normal_ppl": 1.3578317801964876
+    },
+    "bios_unknown_people": {
+     "normal": 1.3507932871580124,
+     "normal_ppl": 3.8604867909021308
+    }
+   },
+   "greedy_born_in": {
+    "normal": {
+     "correct": 0.85,
+     "samples": [
+      {
+       "name": "Zoclevel Pimzimfen",
+       "truth": "Recife",
+       "generated": "Recife. Z"
+      },
+      {
+       "name": "Lumyar Velrashal",
+       "truth": "Perth",
+       "generated": "Perth. The"
+      },
+      {
+       "name": "Oskul Fendru",
+       "truth": "Hanoi",
+       "generated": "Hanoi."
+      },
+      {
+       "name": "Zosil Braro",
+       "truth": "Minsk",
+       "generated": "Sapporo"
+      },
+      {
+       "name": "Vekcle Silgorquel",
+       "truth": "Leeds",
+       "generated": "Leeds. The"
+      },
+      {
+       "name": "Velul Torwenwen",
+       "truth": "Tunis",
+       "generated": "Tunis."
+      },
+      {
+       "name": "Torraslum Dovbra",
+       "truth": "Leeds",
+       "generated": "Leeds. Tor"
+      },
+      {
+       "name": "Isdovlum Lumzimwen",
+       "truth": "Dakar",
+       "generated": "Dakar."
+      }
+     ]
+    }
+   }
+  },
+  "verify_seconds": 17.65825343132019
+ }
+]

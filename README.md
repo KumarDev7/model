@@ -115,9 +115,9 @@ run per v5e chip):
 * **No collapse.** 99.7% of vectors read on held-out text, 96.6% get a fair
   share, evenness still rising at 120k steps; no run diverged.
 * **Limits.** The same backbone learns facts much faster with the pool
-  (60.7% vs 8.1% at 60k steps), but at equal wall-clock a 2.4x wider dense
-  model matches it (a pool step costs ~4x a dense step of the same backbone:
-  77-100 vs 23 ms on a v5e chip).
+  (60.7% vs 8.1% at 60k steps; dense needs ~3x the steps), but a pool step
+  still costs 53-78 ms against 8.3 ms dense on one v5e chip (d512 x 6), so
+  at equal wall-clock dense still wins.
   No model here recalls facts through wordings it never saw in training
   (0.4-2.1%), and the pool must be large enough for the facts: with 262k
   vectors a d256 pool model recalls 6-15% of 80,000 facts, with 1M 80.8%.
