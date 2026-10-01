@@ -35,9 +35,11 @@ def test_metrics_log_has_every_step_and_event(tmp_path):
     train = [r for r in recs if r["type"] == "train"]
     assert [r["step"] for r in train] == list(range(1, 13))  # one line per step, in order
     for r in train:
-        for k in ("loss", "ce", "acc", "grad_norm", "lr", "param_norm", "update_norm", "logit_max", "step_s",
-                  "tokens_per_s", "tokens", "data_s", "nonfinite", "gn_attn", "gn_layer0", "gn_pool_values"):
+        for k in ("loss", "ce", "acc", "grad_norm", "lr", "param_norm", "update_norm", "logit_max", "tokens",
+                  "data_s", "nonfinite", "gn_attn", "gn_layer0", "gn_pool_values"):
             assert k in r, k
+        # speed is left out of the first step (compilation) and averaged over recent steps after it
+        assert ("step_s" in r and r["tokens_per_s"] > 0) == (r["step"] > 1)
         assert r["nonfinite"] is False and r["tokens"] == r["step"] * 16 * (ds.seq_len - 1)
     assert train[0]["first"] and train[5]["lr"] > train[0]["lr"]  # warmup
     assert [r["step"] for r in recs if r["type"] == "eval"] == [6, 12]

@@ -135,7 +135,8 @@ def report(train, by_type, samples) -> str:
                    + (f"; MFU {np.nanmedian(series(steady, 'mfu')):.3f}" if "mfu" in steady[-1] else ""))
         out.append(f"   host data time {np.nanmedian(series(steady, 'data_s')) * 1e3:.2f} ms/step median")
         pause = np.nansum(series(train, "pause_s"))
-        busy = np.nansum(st)
+        gaps = np.diff(np.concatenate([[steps[0] - 1], steps]))  # steps each record stands for
+        busy = np.nansum(series(train, "step_s") * gaps)
         out.append(f"   training paused {pause:.0f}s in total (eval, checkpoint copies, sample copies) "
                    f"= {100 * pause / max(pause + busy, 1e-9):.2f}% of the time")
         if "data" in train[-1]:

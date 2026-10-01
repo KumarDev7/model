@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Training Monitor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #677085; --line: #e3e6ec;
+  --accent: #2f6fe4; --good: #1f9d55; --warn: #c27c0e; --bad: #d64545; --code: #f0f2f5;
+  --c1: #2f6fe4; --c2: #e4572e; --c3: #1f9d55; --c4: #9b51e0; --c5: #c27c0e; --c6: #0ea5b7; --c7: #d6457f; --c8: #6b7280;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --panel: #171b23; --text: #e6e9ef; --muted: #8b93a7; --line: #262c38;
+    --accent: #6d9eff; --good: #3ecf7a; --warn: #f0b429; --bad: #ff6b6b; --code: #1d222c;
+    --c1: #6d9eff; --c2: #ff8a5c; --c3: #3ecf7a; --c4: #b98cff; --c5: #f0b429; --c6: #38d0e0; --c7: #ff7aa8; --c8: #9aa3b5;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --panel: #171b23; --text: #e6e9ef; --muted: #8b93a7; --line: #262c38;
+  --accent: #6d9eff; --good: #3ecf7a; --warn: #f0b429; --bad: #ff6b6b; --code: #1d222c;
+  --c1: #6d9eff; --c2: #ff8a5c; --c3: #3ecf7a; --c4: #b98cff; --c5: #f0b429; --c6: #38d0e0; --c7: #ff7aa8; --c8: #9aa3b5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+.wrap { max-width: 1400px; margin: 0 auto; padding: 0 16px; }
+.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 17px; margin: 0; font-weight: 650; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 22px 0 10px; font-weight: 600; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.on .dot { background: var(--good); } .off .dot { background: var(--bad); }
+.spacer { flex: 1; }
+button { background: var(--code); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+button.active { border-color: var(--accent); color: var(--accent); }
+.progress { height: 6px; background: var(--code); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.progress > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+.sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.kpi .l { color: var(--muted); font-size: 12px; }
+.kpi .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.kpi .s { color: var(--muted); font-size: 11px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+.card h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.card h3 span { color: var(--muted); font-weight: 400; }
+.chart { position: relative; height: 230px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+.scroll { overflow-x: auto; }
+.sample { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.sample:last-child { border-bottom: 0; }
+.prompt { font-weight: 600; }
+.samples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+@media (max-width: 900px) { .samples { grid-template-columns: minmax(0, 1fr); } }
+.nl { color: var(--muted); }
+.gen { white-space: pre-wrap; max-height: 9em; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; background: var(--code); padding: 6px 8px; border-radius: 6px; margin-top: 4px; }
+.gen.shuf { opacity: .75; }
+.tag { font-size: 11px; color: var(--muted); }
+pre.log { margin: 0; max-height: 360px; overflow: auto; background: var(--code); padding: 10px; border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.warn { color: var(--warn); } .bad { color: var(--bad); } .good { color: var(--good); }
+.err { background: var(--bad); color: #fff; padding: 8px 16px; display: none; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+select { background: var(--code); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
+footer { color: var(--muted); font-size: 12px; padding: 24px 0; }
+</style>
+</head>
+<body>
+<div class="err" id="err"></div>
+<header>
+  <div class="wrap">
+    <div class="top">
+      <h1 id="run">Training run</h1>
+      <span id="procs"></span>
+      <span class="spacer"></span>
+      <span class="sub" id="updated"></span>
+      <button id="theme" title="Toggle light / dark">◐</button>
+    </div>
+    <div class="progress"><div id="bar"></div></div>
+    <div class="sub" id="progress-text"></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="kpis" id="kpis"></div>
+
+  <h2>Warnings</h2>
+  <div class="card" id="warnings"><span class="sub">none</span></div>
+
+  <h2>Training</h2>
+  <div class="grid">
+    <div class="card"><h3>Loss <span>train (mean per point) · held-out ce</span></h3><div class="chart"><canvas id="c-loss"></canvas></div></div>
+    <div class="card"><h3>Gradient norm <span>max and mean per point · log scale</span></h3><div class="chart"><canvas id="c-gn"></canvas></div></div>
+    <div class="card"><h3>Gradient norm by module <span>log scale</span></h3><div class="chart"><canvas id="c-gnmod"></canvas></div></div>
+    <div class="card"><h3>Gradient norm by layer <span>log scale</span></h3><div class="chart"><canvas id="c-gnlayer"></canvas></div></div>
+    <div class="card"><h3>Learning rate</h3><div class="chart"><canvas id="c-lr"></canvas></div></div>
+    <div class="card"><h3>Max logit · update/param ratio <span>early signs of instability</span></h3><div class="chart"><canvas id="c-stab"></canvas></div></div>
+  </div>
+
+  <h2>Held-out evaluation and pool</h2>
+  <div class="grid">
+    <div class="card"><h3>Accuracy <span>normal · pool off · pool shuffled</span></h3><div class="chart"><canvas id="c-evacc"></canvas></div></div>
+    <div class="card"><h3>Cross-entropy <span>normal · pool shuffled</span></h3><div class="chart"><canvas id="c-evce"></canvas></div></div>
+    <div class="card"><h3>Pool health <span>usage spread, active slots, top-1 weight</span></h3><div class="chart"><canvas id="c-pool"></canvas></div></div>
+    <div class="card"><h3>Train accuracy</h3><div class="chart"><canvas id="c-acc"></canvas></div></div>
+  </div>
+
+  <h2>Speed and hardware</h2>
+  <div class="grid">
+    <div class="card"><h3>Throughput <span>k tokens/s · MFU</span></h3><div class="chart"><canvas id="c-tps"></canvas></div></div>
+    <div class="card"><h3>Step time <span>ms · seconds paused (eval, checkpoint, samples) · host data ms</span></h3><div class="chart"><canvas id="c-step"></canvas></div></div>
+    <div class="card"><h3>Memory <span>device HBM in use / peak · host RSS (GB)</span></h3><div class="chart"><canvas id="c-mem"></canvas></div></div>
+    <div class="card"><h3>Checkpoints <span>last 20</span></h3><div class="scroll" id="ckpts"></div></div>
+  </div>
+
+  <h2>Generated text <span class="tag">(CPU snapshots; second line: pool reads shuffled)</span></h2>
+  <div class="card">
+    <div class="tabs"><select id="snap"></select><span class="sub" id="snapinfo"></span></div>
+    <div id="samples" class="samples"><span class="sub">no samples yet</span></div>
+  </div>
+
+  <h2>Pipeline</h2>
+  <div class="grid">
+    <div class="card"><h3>Data stream and disk</h3><div id="pipeline"></div></div>
+    <div class="card"><h3>Run settings</h3><div class="scroll" id="conf"></div></div>
+  </div>
+
+  <h2>Logs</h2>
+  <div class="card">
+    <div class="tabs" id="logtabs"></div>
+    <pre class="log" id="log"></pre>
+  </div>
+  <footer>Reads the run's files only; refreshes every 5 s (charts every 15 s).</footer>
+</main>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const api = (p) => fetch(p + (p.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN), {cache: "no-store"})
+  .then(r => { if (!r.ok) throw new Error(p + ": HTTP " + r.status); return r.json(); });
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const COLORS = ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6", "--c7", "--c8"];
+const col = (i) => css(COLORS[i % COLORS.length]);
+const fmt = (v, d = 3) => v == null || !isFinite(v) ? "–" : (Math.abs(v) >= 1e4 || (Math.abs(v) < 1e-3 && v !== 0)) ? v.toExponential(2) : (+v).toPrecision(d);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const showText = (t) => esc(t).replace(/\n+/g, (m) => ' <span class="nl">' + "↵".repeat(Math.min(m.length, 3)) + "</span> ");
+const dur = (s) => s == null ? "–" : s < 90 ? s.toFixed(0) + "s" : s < 5400 ? (s / 60).toFixed(0) + " min" : (s / 3600).toFixed(1) + " h";
+
+// ------------------------------------------------------------ theme
+const savedTheme = (() => { try { return localStorage.getItem("theme"); } catch (e) { return null; } })();
+if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+$("theme").onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark"
+    : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("theme", document.documentElement.dataset.theme); } catch (e) {}
+  Object.values(charts).forEach(c => c.destroy()); for (const k in charts) delete charts[k];
+  refreshCharts();
+};
+
+// ------------------------------------------------------------ charts
+const charts = {};
+function chart(id, datasets, opts = {}) {
+  Chart.defaults.color = css("--muted"); Chart.defaults.borderColor = css("--line");
+  const scales = {x: {type: "linear", title: {display: false}, ticks: {maxTicksLimit: 7}}, y: {type: opts.log ? "logarithmic" : "linear"}};
+  if (opts.y2) scales.y2 = {position: "right", grid: {drawOnChartArea: false}};
+  if (opts.min != null) scales.y.min = opts.min;
+  if (opts.max != null) scales.y.max = opts.max;
+  const cfg = {type: "line", data: {datasets}, options: {
+    animation: false, parsing: false, normalized: true, maintainAspectRatio: false, spanGaps: true,
+    interaction: {mode: "nearest", axis: "x", intersect: false},
+    plugins: {legend: {labels: {boxWidth: 10, font: {size: 11}}}, tooltip: {callbacks: {title: (it) => "step " + it[0].parsed.x}}},
+    elements: {point: {radius: 0}, line: {borderWidth: 1.4}}, scales}};
+  if (charts[id]) { charts[id].data.datasets = datasets; charts[id].update(); return; }
+  charts[id] = new Chart($(id), cfg);
+}
+const ds = (label, xs, ys, i, extra = {}) => ({label, data: xs.map((x, k) => ({x, y: ys[k]})).filter(p => p.y != null && (!extra.positive || p.y > 0)),
+  borderColor: col(i), backgroundColor: col(i), ...extra});
+
+let FIELDS = [];
+async function refreshCharts() {
+  FIELDS = await api("/api/fields");
+  const gnMod = FIELDS.filter(f => f.startsWith("gn_") && !/^gn_layer\d+$/.test(f));
+  const gnLayer = FIELDS.filter(f => /^gn_layer\d+$/.test(f)).sort((a, b) => +a.slice(8) - +b.slice(8));
+  const want = ["loss", "grad_norm", "lr", "logit_max", "update_norm", "param_norm", "acc", "tokens_per_s", "mfu", "step_s",
+    "pause_s", "data_s", "hbm_gb", "hbm_peak_gb", "host_rss_gb", "slot_spread_ema", "slot_active_ema", "subkey_spread",
+    "top1_weight", "pick_agreement", ...gnMod, ...gnLayer].filter(f => FIELDS.includes(f));
+  const [s, st] = await Promise.all([api("/api/series?points=1200&fields=" + want.join(",")), api("/api/status")]);
+  const x = s.step, F = s.fields, g = (f, a = "mean") => F[f] ? F[f][a] : [];
+  const ev = st.evals || [];
+  chart("c-loss", [ds("train loss", x, g("loss"), 0),
+    {label: "held-out ce", data: ev.map(e => ({x: e.step, y: e.ce})), borderColor: col(1), backgroundColor: col(1), pointRadius: 3, showLine: true}]);
+  chart("c-gn", [ds("max", x, g("grad_norm", "max"), 1, {positive: true}), ds("mean", x, g("grad_norm"), 0, {positive: true})], {log: true});
+  chart("c-gnmod", gnMod.map((f, i) => ds(f.slice(3), x, g(f), i, {positive: true})), {log: true});
+  chart("c-gnlayer", gnLayer.map((f, i) => ds(f.slice(3), x, g(f), i, {positive: true})), {log: true});
+  chart("c-lr", [ds("lr", x, g("lr"), 0)]);
+  const un = g("update_norm"), pn = g("param_norm");
+  chart("c-stab", [ds("max |logit|", x, g("logit_max", "max"), 1),
+    ds("update/param", x, un.map((u, k) => u != null && pn[k] ? u / pn[k] : null), 0, {yAxisID: "y2"})], {y2: true});
+  chart("c-evacc", ["acc", "acc_nopool", "acc_shuffled_pool"].filter(k => ev.length && k in ev[ev.length - 1])
+    .map((k, i) => ({label: k, data: ev.map(e => ({x: e.step, y: e[k]})), borderColor: col(i), backgroundColor: col(i), pointRadius: 3})));
+  chart("c-evce", ["ce", "ce_shuffled_pool"].filter(k => ev.length && k in ev[ev.length - 1])
+    .map((k, i) => ({label: k, data: ev.map(e => ({x: e.step, y: e[k]})), borderColor: col(i), backgroundColor: col(i), pointRadius: 3})));
+  chart("c-pool", ["slot_spread_ema", "slot_active_ema", "subkey_spread", "top1_weight", "pick_agreement"].filter(f => F[f])
+    .map((f, i) => ds(f, x, g(f), i)));
+  chart("c-acc", [ds("train acc", x, g("acc"), 2)]);
+  chart("c-tps", [ds("k tokens/s", x, g("tokens_per_s").map(v => v == null ? null : v / 1e3), 0),
+    ...(F.mfu ? [ds("MFU", x, g("mfu"), 2, {yAxisID: "y2"})] : [])], {y2: !!F.mfu, min: 0});
+  chart("c-step", [ds("step ms", x, g("step_s").map(v => v == null ? null : v * 1e3), 0),
+    ds("paused s", x, g("pause_s", "max"), 1, {yAxisID: "y2"}), ds("data ms", x, g("data_s").map(v => v == null ? null : v * 1e3), 2)], {y2: true, min: 0});
+  chart("c-mem", [ds("HBM in use", x, g("hbm_gb"), 0), ds("HBM peak", x, g("hbm_peak_gb", "max"), 1), ds("host RSS", x, g("host_rss_gb"), 2)], {min: 0});
+}
+
+// ------------------------------------------------------------ status
+function kpi(label, value, sub = "", cls = "") {
+  return `<div class="kpi"><div class="l">${label}</div><div class="v ${cls}">${value}</div><div class="s">${sub}</div></div>`;
+}
+async function refreshStatus() {
+  const st = await api("/api/status");
+  $("err").style.display = "none";
+  $("run").textContent = st.run;
+  document.title = st.run + " · step " + st.step;
+  $("procs").innerHTML = Object.entries(st.processes).map(([k, v]) => `<span class="pill ${v ? "on" : "off"}"><span class="dot"></span>${k}</span>`).join(" ");
+  const pct = st.total_steps ? 100 * st.step / st.total_steps : 0;
+  $("bar").style.width = pct.toFixed(2) + "%";
+  const age = st.last_record_time ? st.now - st.last_record_time : null;
+  $("progress-text").textContent = `step ${st.step.toLocaleString()} / ${(st.total_steps || 0).toLocaleString()} (${pct.toFixed(1)}%) · ETA ${dur(st.eta_s)} · `
+    + `checkpoint at step ${st.checkpoint_step ?? "–"} · ${st.sessions} session(s)` + (st.events.end ? ` · last outcome: ${st.events.end.outcome}` : "");
+  $("updated").innerHTML = age == null ? "no data yet" : `last step logged <span class="${age > 120 ? "bad" : ""}">${dur(age)} ago</span>`;
+  const L = st.last || {}, R = st.recent || {}, ev = st.evals.length ? st.evals[st.evals.length - 1] : null;
+  const d = st.data;
+  $("kpis").innerHTML = [
+    kpi("Loss (last 100)", fmt(R.loss, 4), "step " + (L.step ?? "–")),
+    kpi("Held-out ce", ev ? fmt(ev.ce, 4) : "–", ev ? `step ${ev.step}, acc ${fmt(ev.acc)}` : ""),
+    kpi("Pool shuffled ce", ev && ev.ce_shuffled_pool != null ? fmt(ev.ce_shuffled_pool, 4) : "–", "higher = pool is used"),
+    kpi("Grad norm", fmt(L.grad_norm), "mean " + fmt(L.grad_norm_ema)),
+    kpi("Learning rate", fmt(L.lr)),
+    kpi("Throughput", R.tokens_per_s ? (R.tokens_per_s / 1e3).toFixed(0) + "k tok/s" : "–", st.step_s ? (st.step_s * 1e3).toFixed(0) + " ms/step" : ""),
+    kpi("MFU", R.mfu != null ? (100 * R.mfu).toFixed(1) + "%" : "–"),
+    kpi("Time paused", (100 * st.paused_share).toFixed(2) + "%", "eval, checkpoint, sample copies", st.paused_share > 0.05 ? "warn" : ""),
+    kpi("Data", d ? (d.tokens / 1e9).toFixed(3) + "B tok" : "–", d ? `${d.shard} · waited ${dur(d.wait_s)}` : "", d && d.wait_s > 60 ? "warn" : ""),
+    kpi("Device memory", L.hbm_gb != null ? L.hbm_gb.toFixed(1) + " GB" : "–", L.hbm_limit_gb ? "of " + L.hbm_limit_gb.toFixed(1) + " GB" : ""),
+    kpi("Warnings", st.warnings.length, "non-finite / spikes", st.warnings.length ? "warn" : "good"),
+  ].join("");
+  $("warnings").innerHTML = st.warnings.length ? `<div class="scroll"><table><tr><th>step</th><th>what</th><th>largest gradients</th></tr>`
+    + st.warnings.slice().reverse().map(w => `<tr><td>${w.step}</td><td class="warn">${esc(w.kind)}</td><td>${esc(w.detail || "")}</td></tr>`).join("") + "</table></div>"
+    : `<span class="sub good">none: no non-finite steps or gradient spikes</span>`;
+  $("ckpts").innerHTML = st.checkpoints.length ? `<table><tr><th>step</th><th>written in</th><th>training waited</th><th>size</th></tr>`
+    + st.checkpoints.slice().reverse().map(c => `<tr><td>${c.step}</td><td>${fmt(c.write_s)} s</td><td>${fmt((c.copy_s || 0) + (c.waited_s || 0))} s${c.sync ? " (in step)" : ""}</td><td>${c.gb ? c.gb.toFixed(2) + " GB" : ""}</td></tr>`).join("") + "</table>"
+    : `<span class="sub">no checkpoint yet</span>`;
+  const s = st.stream, dk = st.disk;
+  $("pipeline").innerHTML = `<table>
+    <tr><th>stream directory</th><td>${esc(s.dir || st.conf.STREAM_DIR || "–")}</td></tr>
+    <tr><th>shards ready</th><td>${s.shards_ready ?? "–"} (${s.gb_ready != null ? s.gb_ready.toFixed(2) : "–"} GB)</td></tr>
+    <tr><th>parts tokenised</th><td>${s.parts_done ?? "–"} of ${s.parts_total ?? "–"}</td></tr>
+    <tr><th>tokens read by training</th><td>${d ? (d.tokens / 1e9).toFixed(3) + " B" : "–"}</td></tr>
+    <tr><th>waited for data</th><td>${d ? dur(d.wait_s) : "–"}</td></tr>
+    ${Object.entries(dk).map(([k, v]) => `<tr><th>disk free (${k})</th><td class="${v.free_gb < 15 ? "warn" : ""}">${v.free_gb.toFixed(1)} of ${v.total_gb.toFixed(0)} GB</td></tr>`).join("")}
+    <tr><th>samples</th><td>${st.events.sample_started ? "last started at step " + st.events.sample_started.step : "–"}${st.events.sample_skipped ? ", skipped at " + st.events.sample_skipped.step : ""}</td></tr>
+  </table>`;
+  $("conf").innerHTML = "<table>" + Object.entries(st.conf).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("") + "</table>";
+  return st;
+}
+
+// ------------------------------------------------------------ samples
+let SNAPS = [];
+async function refreshSamples() {
+  const snaps = await api("/api/samples");
+  if (!snaps.length) return;
+  const keep = $("snap").value;
+  const latest = keep === "" || +keep === (SNAPS.length ? SNAPS[SNAPS.length - 1].step : -1);
+  SNAPS = snaps;
+  $("snap").innerHTML = snaps.map((s, i) => `<option value="${s.step}">step ${s.step}</option>`).reverse().join("");
+  $("snap").value = latest ? snaps[snaps.length - 1].step : keep;
+  showSnap();
+}
+function showSnap() {
+  const s = SNAPS.find(x => x.step == $("snap").value) || SNAPS[SNAPS.length - 1];
+  if (!s) return;
+  $("snapinfo").textContent = `${s.samples.length} prompts · ${s.seconds}s on CPU · same text with pool shuffled: ${s.same_with_pool_shuffled ?? "–"} of ${s.samples.length}`;
+  $("samples").innerHTML = s.samples.map(x => `<div class="sample"><div class="prompt">${esc(x.prompt)} <span class="tag">${x.mean_top_prob != null ? "mean top-token prob " + x.mean_top_prob : ""}</span></div>
+    <div class="gen">${showText(x.text)}</div>${x.text_pool_shuffled != null ? `<div class="gen shuf"><span class="tag">pool shuffled: </span>${showText(x.text_pool_shuffled)}</div>` : ""}</div>`).join("");
+}
+$("snap").onchange = showSnap;
+
+// ------------------------------------------------------------ logs
+let LOG = "train";
+const LOGS = ["train", "supervisor", "stream", "samples", "wandb", "tunnel"];
+$("logtabs").innerHTML = LOGS.map(n => `<button data-n="${n}">${n}</button>`).join("");
+$("logtabs").onclick = (e) => { if (e.target.dataset.n) { LOG = e.target.dataset.n; refreshLog(); } };
+async function refreshLog() {
+  [...$("logtabs").children].forEach(b => b.classList.toggle("active", b.dataset.n === LOG));
+  const lines = await api("/api/logs?name=" + LOG);
+  const el = $("log"), atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+  el.textContent = lines.length ? lines.join("\n") : "(empty)";
+  if (atEnd) el.scrollTop = el.scrollHeight;
+}
+
+// ------------------------------------------------------------ loop
+function showError(e) { $("err").textContent = "Dashboard: " + e.message; $("err").style.display = "block"; }
+async function tick() { try { await refreshStatus(); await refreshSamples(); await refreshLog(); } catch (e) { showError(e); } }
+async function tickCharts() { try { await refreshCharts(); } catch (e) { showError(e); } }
+tick(); tickCharts();
+setInterval(tick, 5000);
+setInterval(tickCharts, 15000);
+</script>
+</body>
+</html>

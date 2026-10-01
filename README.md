@@ -279,6 +279,8 @@ path.
 | `memory_pool_model/data.py` | synthetic knowledge-base task, byte-level text, pre-tokenised text, token stream read once (`StreamingTokenDataset`) |
 | `memory_pool_model/background.py` | metrics log, checkpoints written in a background thread, CPU text samples launched while training runs |
 | `memory_pool_model/sample_worker.py` | generates text from a training snapshot on the CPU (pool as trained and pool shuffled) |
+| `memory_pool_model/dashboard.py`, `dashboard.html` | live web dashboard of a run (reads its files only) |
+| `memory_pool_model/wandb_sync.py` | mirrors a run's metrics and samples to Weights & Biases |
 | `memory_pool_model/metrics_report.py` | summary of a run from its metrics log: loss, eval, speed/MFU, pauses, stability, pool health, samples |
 | `memory_pool_model/config.py` | `ModelConfig`, `TrainConfig` (every field is a CLI flag) |
 | `tests/` | correctness tests (exact top-k, collapse, revival, sparse = dense gradients, data parallel, exact resume, host pool, decoding) |
@@ -469,6 +471,18 @@ every N steps in a separate low-priority process on the CPU
 (`--sample_cpus` cores; `--sample_prompts` file, else a fixed general set),
 with the pool as trained and with its reads shuffled. Results go to
 `<path>.samples.jsonl`; training doesn't wait for them.
+
+**Live dashboard.** `train_stream.sh` also starts a web dashboard
+(`memory_pool_model.dashboard`): loss and held-out curves, gradient norms
+by module and layer, max logit, pool health, throughput/MFU/pauses,
+memory, checkpoints, warnings, the generated text, the data stream, disk,
+processes and logs, refreshed every few seconds. It only reads the run's
+files, so it can't slow or break training. A Cloudflare quick tunnel gives
+a public https link (no account needed; printed by `train_stream.sh url`
+and `status`); every request needs the token in that link. With
+`WANDB_API_KEY` set, `memory_pool_model.wandb_sync` also mirrors metrics,
+evals, checkpoints and sample tables to Weights & Biases, so the history
+outlives the VM (a resumed run continues the same W&B run).
 On a new VM (empty stream directory), add
 `--from_checkpoint /data/ckpt/run.msgpack.state.json` to the producer so it
 skips the parts training has already finished.

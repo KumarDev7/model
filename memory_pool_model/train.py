@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import collections
 import dataclasses
 import json
 import math
@@ -790,7 +791,8 @@ _CONSOLE_FIRST = ("loss", "ce", "acc", "grad_norm", "lr")
 def _console_line(rec: Dict[str, Any], t_run: float) -> str:
     """Human-readable summary of one metrics record."""
     head = " ".join(f"{k}={rec[k]:.4g}" for k in _CONSOLE_FIRST if k in rec)
-    perf = f"{rec['step_s'] * 1e3:.0f}ms {rec['tokens_per_s'] / 1e3:.0f}k tok/s"
+    perf = (f"{rec['step_s'] * 1e3:.0f}ms {rec['tokens_per_s'] / 1e3:.0f}k tok/s" if "step_s" in rec
+            else "first step (compiling)")
     if "mfu" in rec:
         perf += f" mfu={rec['mfu']:.2f}"
     parts = [f"step {rec['step']:5d} | {head}", perf]
@@ -919,22 +921,35 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
     last_logged = start - 1
     t_last = time.perf_counter()
     paused = 0.0  # seconds of eval / checkpoint copy / sample copy since the last record
+    paused_total = 0.0
+    # (time, step, paused_total) of recent records: step time is averaged over
+    # ~20 steps, since a single step's share depends on when its metrics were read
+    window = collections.deque([(t_last, start - 1, 0.0)], maxlen=21)
     gn_ema = None
 
     def flush():
         """Fetch the pending step's metrics (waits for that step only) and
         write its record. Returns the record."""
-        nonlocal pending, t_last, paused, gn_ema
+        nonlocal pending, t_last, paused, paused_total, gn_ema
         if pending is None:
             return None
         step_p, dev_metrics, info = pending
         pending = None
         m = {k: float(v) for k, v in jax.device_get(dev_metrics).items() if not k.startswith("_")}
         now = time.perf_counter()
-        busy = max(now - t_last - paused, 1e-9)
-        rec = {"type": "train", "step": step_p, **m, **info["extra"],
-               "step_s": busy / info["n_steps"], "pause_s": paused,
-               "tokens_per_s": tokens_per_step * info["n_steps"] / busy, "tokens": step_p * tokens_per_step}
+        paused_total += paused
+        if info["extra"].get("first"):  # compilation: not a training speed
+            window.clear()
+        else:
+            t_old, s_old, p_old = window[0]
+            busy = max(now - t_old - (paused_total - p_old), 1e-9)
+            step_s = busy / max(step_p - s_old, 1)
+        window.append((now, step_p, paused_total))
+        rec = {"type": "train", "step": step_p, **m, **info["extra"], "pause_s": paused,
+               "tokens": step_p * tokens_per_step}
+        if not info["extra"].get("first"):
+            rec["step_s"] = step_s  # mean over the last ~20 steps, pauses excluded
+            rec["tokens_per_s"] = tokens_per_step / step_s
         t_last, paused = now, 0.0
         if peak:
             rec["mfu"] = rec["tokens_per_s"] * fpt / peak

@@ -5,7 +5,8 @@
 #   scripts/train_stream.sh            start or resume, in the foreground
 #   nohup scripts/train_stream.sh > /dev/null 2>&1 &     same, detached (logs in $RUN_DIR/logs)
 #   scripts/train_stream.sh status     step, loss, data position, waits for data, disk
-#   scripts/train_stream.sh stop       stop training and the tokenizer (keeps the last checkpoint)
+#   scripts/train_stream.sh stop       stop training, the tokenizer and the dashboard (keeps the last checkpoint)
+#   scripts/train_stream.sh url        print the dashboard link
 #
 # Logs ($RUN_DIR): logs/train.log (console), model.msgpack.metrics.jsonl (one JSON line per
 # step: every metric, timings, MFU, data position, memory; eval/checkpoint/sample events),
@@ -32,6 +33,9 @@
 #   SAMPLE_EVERY  generate text on the CPU every N steps (default 5000, 0 = off); SAMPLE_CPUS cores for it
 #   PARTS MAX_READY_GB WORKERS SHARD_TOKENS   (stream producer)
 #   MAX_RESTARTS  training restarts after a crash before giving up (default 5)
+#   DASHBOARD     1 = live web dashboard of the run (default), 0 = off; DASHBOARD_PORT (default 8765)
+#   TUNNEL        cloudflared = public https link through a Cloudflare quick tunnel (default), none = local only
+#   WANDB_API_KEY set it to mirror metrics and samples to Weights & Biases (WANDB_PROJECT, WANDB_ENTITY)
 #   PYTHON        python interpreter (default python3)
 #   POLL_SECONDS  how often the supervisor checks training and the producer (default 30)
 
@@ -165,6 +169,84 @@ start_producer() {
     echo $! > "$RUN_DIR/stream.pid"
 }
 
+# ------------------------------------------------------------ live dashboard
+DASHBOARD=${DASHBOARD:-1}
+DASHBOARD_PORT=${DASHBOARD_PORT:-8765}
+TUNNEL=${TUNNEL:-cloudflared}
+
+start_dashboard() {
+    [ "$DASHBOARD" = 1 ] || return 0
+    if ! alive "$RUN_DIR/dashboard.pid" memory_pool_model.dashboard; then
+        (cd "$REPO" && exec setsid nice -n 5 "$PYTHON" -m memory_pool_model.dashboard --run_dir "$RUN_DIR" \
+            --port "$DASHBOARD_PORT" >> "$LOG_DIR/dashboard.log" 2>&1) &
+        echo $! > "$RUN_DIR/dashboard.pid"
+        for _ in $(seq 20); do [ -s "$RUN_DIR/dashboard.token" ] && break; sleep 0.5; done
+        log "dashboard on port $DASHBOARD_PORT"
+    fi
+    start_tunnel
+}
+
+cloudflared_bin() {
+    command -v cloudflared 2>/dev/null && return 0
+    local bin=$BASE/bin/cloudflared arch
+    if [ ! -x "$bin" ]; then
+        case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; *) return 1 ;; esac
+        mkdir -p "$BASE/bin"
+        curl -fsSL -o "$bin.tmp" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$arch" \
+            && chmod +x "$bin.tmp" && mv "$bin.tmp" "$bin" || return 1
+    fi
+    echo "$bin"
+}
+
+start_tunnel() {
+    local token url bin
+    token=$(cat "$RUN_DIR/dashboard.token" 2>/dev/null || true)
+    if [ "$TUNNEL" != cloudflared ]; then
+        echo "http://127.0.0.1:$DASHBOARD_PORT/?token=$token" > "$RUN_DIR/dashboard_url.txt"
+        return 0
+    fi
+    alive "$RUN_DIR/tunnel.pid" cloudflared && return 0
+    bin=$(cloudflared_bin) || { log "WARNING: no cloudflared; dashboard only at http://127.0.0.1:$DASHBOARD_PORT/?token=$token"; return 0; }
+    : > "$LOG_DIR/tunnel.log"
+    (exec setsid "$bin" tunnel --no-autoupdate --url "http://127.0.0.1:$DASHBOARD_PORT" >> "$LOG_DIR/tunnel.log" 2>&1) &
+    echo $! > "$RUN_DIR/tunnel.pid"
+    for _ in $(seq 60); do
+        url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_DIR/tunnel.log" | head -n 1 || true)
+        [ -n "$url" ] && break
+        sleep 1
+    done
+    if [ -n "$url" ]; then
+        (umask 077 && echo "$url/?token=$token" > "$RUN_DIR/dashboard_url.txt")
+        log "dashboard: $url/?token=$token"
+    else
+        log "WARNING: tunnel gave no URL yet (see $LOG_DIR/tunnel.log)"
+    fi
+}
+
+start_wandb() {
+    [ -n "${WANDB_API_KEY:-}" ] || return 0
+    alive "$RUN_DIR/wandb.pid" memory_pool_model.wandb_sync && return 0
+    grep -q "W&B sync done" "$LOG_DIR/wandb.log" 2>/dev/null && [ "$(ckpt_step)" -ge "$STEPS" ] && return 0
+    if ! "$PYTHON" -c "import wandb" 2>/dev/null; then
+        "$PYTHON" -m pip install -q wandb || { log "WARNING: pip install wandb failed; no W&B mirror"; return 0; }
+    fi
+    (cd "$REPO" && exec setsid nice -n 5 "$PYTHON" -m memory_pool_model.wandb_sync --run_dir "$RUN_DIR" \
+        --name "$RUN_NAME" >> "$LOG_DIR/wandb.log" 2>&1) &
+    echo $! > "$RUN_DIR/wandb.pid"
+    log "mirroring to Weights & Biases (project ${WANDB_PROJECT:-memory-pool-lm})"
+}
+
+start_monitors() {
+    start_dashboard
+    start_wandb
+}
+
+stop_monitors() {
+    stop_pid "$RUN_DIR/wandb.pid" memory_pool_model.wandb_sync "W&B sync"
+    stop_pid "$RUN_DIR/tunnel.pid" cloudflared tunnel
+    stop_pid "$RUN_DIR/dashboard.pid" memory_pool_model.dashboard dashboard
+}
+
 # ------------------------------------------------------------------ training
 train_once() {
     local vocab
@@ -181,6 +263,7 @@ train_once() {
     while kill -0 "$pid" 2>/dev/null; do
         sleep "$POLL"
         start_producer  # restart it if it died
+        start_monitors  # and the dashboard, tunnel, W&B mirror
     done
     local rc=0
     wait "$pid" || rc=$?
@@ -200,7 +283,7 @@ run() {
     mkdir -p "$LOG_DIR"
     exec > >(tee -a "$LOG_DIR/supervisor.log") 2>&1
     echo $$ > "$RUN_DIR/supervisor.pid"
-    trap 'log "interrupted"; stop_pid "$RUN_DIR/train.pid" memory_pool_model.train training; stop_pid "$RUN_DIR/stream.pid" stream_ultrafineweb "stream producer"; rm -f "$RUN_DIR/supervisor.pid"; exit 130' INT TERM
+    trap 'log "interrupted"; stop_pid "$RUN_DIR/train.pid" memory_pool_model.train training; stop_pid "$RUN_DIR/stream.pid" stream_ultrafineweb "stream producer"; stop_monitors; rm -f "$RUN_DIR/supervisor.pid"; exit 130' INT TERM
 
     check_env
     ensure_data
@@ -208,6 +291,7 @@ run() {
     step=$(ckpt_step)
     if [ "$step" -gt 0 ]; then log "resuming $RUN_NAME from step $step of $STEPS"; else log "starting $RUN_NAME: $STEPS steps"; fi
     start_producer
+    start_monitors
 
     local restarts=0
     while true; do
@@ -217,6 +301,7 @@ run() {
         train_once || rc=$?
         if [ $rc -eq 0 ]; then
             log "training finished: $CKPT"
+            [ "$DASHBOARD" = 1 ] && log "the dashboard stays up for the finished run ($0 url); $0 stop ends it"
             break
         fi
         local now
@@ -246,6 +331,7 @@ status() {
     if alive "$RUN_DIR/train.pid" memory_pool_model.train; then echo "training   running"; else echo "training   not running"; fi
     if alive "$RUN_DIR/stream.pid" stream_ultrafineweb; then echo "producer   running"; else echo "producer   not running"; fi
     echo "checkpoint step $(ckpt_step) of $STEPS"
+    [ -f "$RUN_DIR/dashboard_url.txt" ] && echo "dashboard  $(cat "$RUN_DIR/dashboard_url.txt")$(alive "$RUN_DIR/dashboard.pid" memory_pool_model.dashboard || echo ' (not running)')"
     if [ -f "$CKPT.metrics.jsonl" ]; then
         (cd "$REPO" && "$PYTHON" -m memory_pool_model.metrics_report "$CKPT.metrics.jsonl" --brief 2>/dev/null) || true
     fi
@@ -263,12 +349,14 @@ stop() {
     stop_pid "$RUN_DIR/supervisor.pid" train_stream supervisor
     stop_pid "$RUN_DIR/train.pid" memory_pool_model.train training
     stop_pid "$RUN_DIR/stream.pid" stream_ultrafineweb "stream producer"
+    stop_monitors
     log "stopped; resume with: $0 (continues from checkpoint step $(ckpt_step))"
 }
 
 case "${1:-run}" in
     run | start | resume) run ;;
     status) status ;;
+    url) cat "$RUN_DIR/dashboard_url.txt" 2>/dev/null || die "no dashboard link yet" ;;
     stop) stop ;;
     *) echo "usage: $0 [run|status|stop]" >&2; exit 2 ;;
 esac
