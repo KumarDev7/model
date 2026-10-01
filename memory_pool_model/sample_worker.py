@@ -63,7 +63,10 @@ def main():
     mcfg = ModelConfig(**{k: v for k, v in m.items() if k in ModelConfig.__dataclass_fields__})
     with open(a.params, "rb") as f:
         params = serialization.msgpack_restore(f.read())
-    params = jax.tree_util.tree_map(lambda x: np.asarray(x, np.float32) if np.issubdtype(np.asarray(x).dtype, np.floating) else x, params)
+    # on the device once: numpy leaves would be copied again at every generated token
+    params = jax.tree_util.tree_map(
+        lambda x: jax.device_put(np.asarray(x, np.float32) if np.issubdtype(np.asarray(x).dtype, np.floating) else x),
+        params)
     tok = Tokenizer.from_file(a.tokenizer)
     eot = tok.token_to_id("<|endoftext|>")
     if a.prompts:
