@@ -685,5 +685,14 @@ high-quality videos, images, and other media.
   reads it.
 * No collapse: every sub-key is used, the routing statistics were flat from
   20k steps to the end.
+* **Write test** (1,000 new people, 3,000 steps at batch 32 on one chip;
+  the 368M model's training batch of 256 does not fit one chip):
+
+  | arm | old facts (before: 92.9%) | new people (before: 2.8%) | held-out ppl (before: 19.5) |
+  |---|---|---|---|
+  | **pool vectors only** (backbone, router, keys bit-identical) | 77.7% | **99.5%** | **19.9** |
+  | pool vectors only, with replay of old bios | 90.4% | 98.9% | 19.9 |
+  | full fine-tune | 5.1% | 99.9% | 60.5 |
+
 * Not run at this size: the dense twin (no baseline for the same compute),
   and a second seed.
