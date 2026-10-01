@@ -645,7 +645,8 @@ the 90k checkpoint with the softmax in float32 and nothing else changed
 | **float32 softmax** | 0.24 | 0.25 | 0.25 | 0.25 | 0.25 | **2.744** |
 
 `ModelConfig.attn_fp32_softmax` (default on) now computes the attention
-softmax in float32 under 16-bit compute. The earlier float32 runs (15 pool
+softmax in float32 under 16-bit compute; it costs nothing measurable (160.0
+ms per step on 8 chips with and without). The earlier float32 runs (15 pool
 models, 120k steps) never showed this, and the float16 runs were short.
 
 The run was stopped at 95k and continued from the 90k checkpoint with the
