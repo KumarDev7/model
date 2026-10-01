@@ -5,6 +5,7 @@ Usage:
     python -m memory_pool_model.train --task facts --use_memory false   # baseline
     python -m memory_pool_model.train --task text --text_path input.txt
     python -m memory_pool_model.train --task tokens --train_tokens train.npy --eval_tokens val.npy --vocab_size 16384
+    python -m memory_pool_model.train --task stream --stream_dir <stream> --eval_tokens val.npy --vocab_size 16384
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import optax
 from flax import serialization, struct
 
 from .config import ModelConfig, TrainConfig
-from .data import FactDataset, TextDataset, TokenDataset
+from .data import FactDataset, StreamingTokenDataset, TextDataset, TokenDataset
 from .memory import key_diversity_loss, revive_dead_keys
 from .model import MemoryPoolLM
 
@@ -701,17 +702,21 @@ def _fmt(metrics: Dict[str, Any]) -> str:
 
 
 # ------------------------------------------------------------- checkpoints
-def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, history, host=None) -> None:
+def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, history, host=None,
+                    data_state=None) -> None:
     """Resumable checkpoint: full train state + data RNG + eval history
-    (+ a snapshot of a host pool). Written to temp files and renamed, so a
-    crash never leaves a torn file."""
+    (+ a snapshot of a host pool, + the position in a token stream).
+    Written to temp files and renamed, so a crash never leaves a torn file."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if host is not None:
         host.save(path + ".pool")
     with open(path + ".tmp", "wb") as f:
         f.write(serialization.to_bytes(jax.device_get(state)))
     with open(path + ".json.tmp", "w") as f:
-        json.dump({"step": int(state.step), "np_rng": np_rng.bit_generator.state, "history": history}, f)
+        meta = {"step": int(state.step), "np_rng": np_rng.bit_generator.state, "history": history}
+        if data_state is not None:
+            meta["data_state"] = data_state
+        json.dump(meta, f)
     os.replace(path + ".tmp", path)
     os.replace(path + ".json.tmp", path + ".json")
 
@@ -725,7 +730,7 @@ def load_checkpoint(path: str, template: TrainState, host=None):
         meta = json.load(f)
     np_rng = np.random.default_rng()
     np_rng.bit_generator.state = meta["np_rng"]
-    return state, np_rng, meta["history"]
+    return state, np_rng, meta["history"], meta.get("data_state")
 
 
 def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = None,
@@ -753,10 +758,20 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
         with open(save_path + ".config.json", "w") as f:
             json.dump({"model": dataclasses.asdict(mcfg), "train": dataclasses.asdict(tcfg), **(meta or {})}, f)
     if resume and ckpt and os.path.exists(ckpt):
-        state, np_rng, history = load_checkpoint(ckpt, state, trainer.host)
+        state, np_rng, history, data_state = load_checkpoint(ckpt, state, trainer.host)
+        if data_state is not None and hasattr(dataset, "load_state_dict"):
+            dataset.load_state_dict(data_state)
         print(f"resumed from {ckpt} at step {int(state.step)}")
     state = trainer.place_state(state)
     start = int(state.step) + 1
+    streaming = hasattr(dataset, "state_dict")
+    if streaming:  # consumed shards are deleted once a checkpoint is past them
+        dataset.defer_delete = ckpt is not None
+
+    def checkpoint():
+        save_checkpoint(ckpt, state, np_rng, history, trainer.host, dataset.state_dict() if streaming else None)
+        if streaming:
+            dataset.checkpoint_saved()
 
     n_params = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
     n_pool = sum(x.size for x in jax.tree_util.tree_leaves(state.params.get("pool", {})))
@@ -796,6 +811,8 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
             msg = f"step {step:5d} | {_fmt(metrics)}"
             if revived:
                 msg += f" | revived_subkeys={revived}"
+            if streaming:
+                msg += f" | {dataset.progress()}"
             print(f"{msg} | {time.time() - t0:.0f}s", flush=True)
 
         if step % tcfg.eval_every == 0 or step == tcfg.steps:
@@ -805,7 +822,7 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
 
         if ckpt and ((tcfg.checkpoint_every and step % tcfg.checkpoint_every == 0)
                      or step == stop_after):
-            save_checkpoint(ckpt, state, np_rng, history, trainer.host)
+            checkpoint()
         if step == stop_after:
             print(f"stopping after step {step} (simulated preemption)")
             return trainer, state, history
@@ -826,7 +843,7 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
                 f,
                 indent=2,
             )
-        save_checkpoint(ckpt, state, np_rng, history, trainer.host)
+        checkpoint()
         print(f"saved params to {save_path}")
     return trainer, state, history
 
@@ -855,10 +872,14 @@ def _from_args(cls, args, **overrides):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--task", choices=["facts", "text", "tokens"], default="facts")
+    parser.add_argument("--task", choices=["facts", "text", "tokens", "stream"], default="facts")
     parser.add_argument("--train_tokens", type=str, default=None, help="--task tokens: training .npy")
     parser.add_argument("--eval_tokens", type=str, default=None, help="--task tokens: held-out .npy")
     parser.add_argument("--eval_windows", type=int, default=640, help="--task tokens: held-out windows per eval")
+    parser.add_argument("--stream_dir", type=str, default=None,
+                        help="--task stream: shard directory of experiments.stream_ultrafineweb")
+    parser.add_argument("--stream_block_shards", type=int, default=4, help="--task stream: shards shuffled together")
+    parser.add_argument("--stream_keep", action="store_true", help="--task stream: don't delete consumed shards")
     parser.add_argument("--text_path", type=str, default=None)
     parser.add_argument("--num_entities", type=int, default=4096)
     parser.add_argument("--num_relations", type=int, default=4)
@@ -892,6 +913,16 @@ def main():
                                eval_windows=args.eval_windows)
         meta["dataset"] = {"train_tokens": args.train_tokens, "eval_tokens": args.eval_tokens,
                            "train_size": int(len(dataset.train)), "eval_size": int(len(dataset.eval))}
+        mcfg = _from_args(ModelConfig, args)
+    elif args.task == "stream":
+        if not (args.stream_dir and args.eval_tokens and args.vocab_size):
+            parser.error("--task stream needs --stream_dir, --eval_tokens and --vocab_size")
+        seq_len = args.max_len or ModelConfig.max_len
+        dataset = StreamingTokenDataset(args.stream_dir, args.eval_tokens, args.vocab_size, seq_len=seq_len,
+                                        eval_windows=args.eval_windows, block_shards=args.stream_block_shards,
+                                        seed=args.data_seed, keep_consumed=args.stream_keep)
+        meta["dataset"] = {"stream_dir": args.stream_dir, "eval_tokens": args.eval_tokens,
+                           "eval_size": int(len(dataset.eval))}
         mcfg = _from_args(ModelConfig, args)
     else:
         if not args.text_path:

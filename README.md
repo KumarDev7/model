@@ -276,7 +276,7 @@ path.
 | `memory_pool_model/train.py` | optimizer, train/eval steps, sparse pool updates, data parallel, checkpoints/resume, CLI |
 | `memory_pool_model/host_pool.py` | the pool kept off the GPU: host RAM or memory-mapped files on SSD |
 | `memory_pool_model/generate.py` | token-by-token generation with a KV cache |
-| `memory_pool_model/data.py` | synthetic knowledge-base task and byte-level text task |
+| `memory_pool_model/data.py` | synthetic knowledge-base task, byte-level text, pre-tokenised text, token stream read once (`StreamingTokenDataset`) |
 | `memory_pool_model/config.py` | `ModelConfig`, `TrainConfig` (every field is a CLI flag) |
 | `tests/` | correctness tests (exact top-k, collapse, revival, sparse = dense gradients, data parallel, exact resume, host pool, decoding) |
 | `experiments/` | knowledge tests, pool-reliance study, facts-in-text study and its verification (`knowledge_study.py`, `knowledge_verify.py`), scaling and SSD-inference benchmarks |
@@ -408,6 +408,29 @@ python -m memory_pool_model.train --data_parallel true --checkpoint_every 500 --
 python -m experiments.scale_bench --n_sub 256 1024 2048            # step time / memory vs pool size
 python -m experiments.ssd_inference --n_sub 2048 --where gpu ram ssd_warm ssd_cold
 ```
+
+### Long runs on a token stream (no repeated data, bounded disk)
+
+`experiments/stream_ultrafineweb.py` tokenises Ultra-FineWeb parts on the
+host CPUs while training runs and writes ~50M-token shards; `--task stream`
+reads them in a fixed order, each token once (windows shuffled within blocks
+of 4 shards). The stream position is part of the checkpoint, so `--resume`
+continues at the exact window; shards a checkpoint is past are deleted. Disk
+holds at most `--max_ready_gb` of unread shards plus one part (~1 GB). The
+producer can be restarted at any time (or on a new VM) and continues where
+it stopped, with identical shards. One worker tokenises ~1.3-3M tokens/s on
+a v5e-8 host; the d768 x 12 pool model reads 410k/s on 8 chips.
+
+```bash
+# tokenizer.json and val.npy (part 2) come from prepare_ultrafineweb.py
+nohup python -m experiments.stream_ultrafineweb --out /data/stream \
+    --tokenizer /data/tok/tokenizer.json --max_ready_gb 10 > stream.log 2>&1 &
+python -m memory_pool_model.train --task stream --stream_dir /data/stream \
+    --eval_tokens /data/tok/val.npy --vocab_size 16384 \
+    --checkpoint_every 5000 --save /data/ckpt/run.msgpack --resume ...
+```
+
+If training ever waits for data, the log line says so (`wait=...s`).
 
 For bit-exact GPU runs set `XLA_FLAGS=--xla_gpu_deterministic_ops=true`;
 otherwise GPU scatter-adds make runs differ in the last float bits.
