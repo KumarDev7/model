@@ -431,6 +431,9 @@ python -m memory_pool_model.train --task stream --stream_dir /data/stream \
 ```
 
 If training ever waits for data, the log line says so (`wait=...s`).
+On a new VM (empty stream directory), add
+`--from_checkpoint /data/ckpt/run.msgpack.state.json` to the producer so it
+skips the parts training has already finished.
 
 For bit-exact GPU runs set `XLA_FLAGS=--xla_gpu_deterministic_ops=true`;
 otherwise GPU scatter-adds make runs differ in the last float bits.

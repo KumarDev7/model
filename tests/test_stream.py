@@ -174,5 +174,42 @@ def test_producer_waits_for_disk_but_not_for_the_oldest_part(tmp_path):
     assert not later.is_alive() and os.path.exists(tmp_path / "p0003.done")
 
 
+def test_new_vm_resume_from_checkpoint(tmp_path, monkeypatch):
+    """Empty stream dir + training checkpoint in part 3: parts 1 and 3's earlier shards aren't needed,
+    part 1 is skipped, part 3 is regenerated identically and the reader continues."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    old.mkdir(), new.mkdir()
+    kw = dict(tok=FakeTok(), parts=[1, 3], shard_tokens=200, max_ready=10**9, chunk_docs=4)
+    for d in (old,):
+        for p in (1, 3):
+            su.produce_part(str(d), p, rows=rows(100 + p), **kw)
+    with open(old / "stream.json", "w") as f:
+        json.dump({"parts": [1, 3], "vocab_size": 65536}, f)
+    np.save(old / "val.npy", np.arange(200, dtype=np.uint16))
+    a = make_ds(old, block_shards=1, keep_consumed=True)
+    while a.state_dict()["part"] == 0 or a.state_dict()["block"][0].startswith("p0001"):
+        a.sample(None, 5)
+    st = a.state_dict()
+    expect = drain(a)
+    ckpt = tmp_path / "run.state.json"
+    ckpt.write_text(json.dumps({"step": 7, "data_state": st}))
+    monkeypatch.setattr(su, "hf_rows", lambda part: rows(100 + part))
+    monkeypatch.setattr(su.sys, "argv", ["x", "--out", str(new), "--tokenizer", "unused", "--parts", "1,3",
+                                         "--shard_tokens", "200", "--from_checkpoint", str(ckpt)])
+    jobs = []
+    monkeypatch.setattr(su, "_run_jobs", lambda js, workers: jobs.extend(js))
+    monkeypatch.setattr(su, "_load_tokenizer", lambda path: (b"{}", 65536))
+    su.main()
+    assert json.loads((new / "p0001.done").read_text())["skipped"] and [j[1] for j in jobs] == [3]
+    su.produce_part(str(new), 3, rows=rows(103), **kw)
+    np.save(new / "val.npy", np.arange(200, dtype=np.uint16))
+    b = make_ds(new, block_shards=1, keep_consumed=True)
+    b.load_state_dict(st)
+    got = drain(b)
+    assert len(got) == len(expect) > 0
+    for x, y in zip(got, expect):
+        np.testing.assert_array_equal(x["inputs"], y["inputs"])
+
+
 def test_parse_parts():
     assert su.parse_parts("1,3-6,9") == [1, 3, 4, 5, 6, 9]

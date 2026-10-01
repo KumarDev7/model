@@ -13,9 +13,10 @@ memory_pool_model.data.StreamingTokenDataset (train --task stream) reads the
 shards in this order and deletes them once a checkpoint is past them. This
 script stays at most --max_ready_gb of unread shards ahead (the oldest
 unfinished part is always allowed to write, so the reader can't wait on a
-full disk). Run it again after a crash or a new VM and it continues where it
-stopped: rows already in shards are skipped, not tokenised again, and the
-shards come out identical.
+full disk). Run it again after a crash and it continues where it stopped:
+rows already in shards are skipped, not tokenised again, and the shards come
+out identical. On a new VM (empty --out), pass the training checkpoint with
+--from_checkpoint so parts the trainer has finished are skipped.
 
     python -m experiments.stream_ultrafineweb --out /data/stream --tokenizer /data/tok/tokenizer.json
 """
@@ -148,6 +149,21 @@ def _worker(args):
             time.sleep(wait)
 
 
+def _load_tokenizer(path: str):
+    """(file bytes, vocab size)"""
+    from tokenizers import Tokenizer
+
+    with open(path, "rb") as f:
+        raw = f.read()
+    return raw, Tokenizer.from_str(raw.decode()).get_vocab_size()
+
+
+def _run_jobs(jobs, workers: int) -> None:
+    with mp.get_context("spawn").Pool(workers) as pool:
+        for _ in pool.imap(_worker, jobs):
+            pass
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
@@ -157,16 +173,14 @@ def main():
     ap.add_argument("--max_ready_gb", type=float, default=10.0, help="unread shards kept ahead of training")
     ap.add_argument("--workers", type=int, default=2, help="parts tokenised at the same time")
     ap.add_argument("--retries", type=int, default=8)
+    ap.add_argument("--from_checkpoint", help="<save>.state.json of the training run: skip the parts it has finished")
     a = ap.parse_args()
     parts = parse_parts(a.parts)
     if HELD_OUT in parts:
         raise ValueError(f"part {HELD_OUT} is the held-out split")
     os.makedirs(a.out, exist_ok=True)
-    with open(a.tokenizer, "rb") as f:
-        tok_bytes = f.read()
-    from tokenizers import Tokenizer
-
-    meta = {"parts": parts, "vocab_size": Tokenizer.from_str(tok_bytes.decode()).get_vocab_size(),
+    tok_bytes, vocab = _load_tokenizer(a.tokenizer)
+    meta = {"parts": parts, "vocab_size": vocab,
             "tokenizer_sha256": hashlib.sha256(tok_bytes).hexdigest(), "shard_tokens": a.shard_tokens}
     meta_path = os.path.join(a.out, "stream.json")
     if os.path.exists(meta_path):
@@ -180,12 +194,20 @@ def main():
         _write_json(meta_path, meta)
         with open(os.path.join(a.out, "tokenizer.json"), "wb") as f:
             f.write(tok_bytes)
+    if a.from_checkpoint:
+        with open(a.from_checkpoint) as f:
+            st = json.load(f)["data_state"]
+        # earliest part the trainer still needs: its current block can start in the part before st["part"]
+        reader_part = min([st["part"]] + [parts.index(int(n[1:5])) for n in st["block"]])
+        for p in parts[:reader_part]:  # marked done, so the budget rule sees the right oldest part
+            done = os.path.join(a.out, f"p{p:04d}.done")
+            if not os.path.exists(done):
+                _write_json(done, {"shards": 0, "skipped": True})
+        print(f"trainer is in part {parts[reader_part]}: {reader_part} parts skipped", flush=True)
     todo = [p for p in parts if not os.path.exists(os.path.join(a.out, f"p{p:04d}.done"))]
     print(f"{len(parts) - len(todo)} of {len(parts)} parts done; {a.workers} workers", flush=True)
     jobs = [(a.out, p, a.tokenizer, parts, meta["shard_tokens"], int(a.max_ready_gb * 1e9), a.retries) for p in todo]
-    with mp.get_context("spawn").Pool(a.workers) as pool:
-        for _ in pool.imap(_worker, jobs):
-            pass
+    _run_jobs(jobs, a.workers)
     print("STREAM_DONE", flush=True)
 
 
