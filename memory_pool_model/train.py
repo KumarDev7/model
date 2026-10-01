@@ -15,6 +15,7 @@ import dataclasses
 import json
 import math
 import os
+import re
 import time
 from typing import Any, Dict
 
@@ -136,6 +137,26 @@ def make_optimizer(tcfg: TrainConfig, clip: bool = True) -> optax.GradientTransf
         scale_pool_values(tcfg.pool_lr_mult),
     ]
     return optax.chain(*parts)
+
+
+_GROUP = {"ln_attn": "ln", "ln_ffn": "ln", "ln_final": "ln", "ffn_in": "ffn", "ffn_out": "ffn",
+          "mem_gate": "mem", "mem_out": "mem", "pos_embed": "embed"}
+
+
+def group_norms(tree, prefix: str) -> Dict[str, jax.Array]:
+    """L2 norm per module kind (embed, attn, ffn, ln, router, mem, pool) and per
+    layer, e.g. gn_attn, gn_layer3: which part of the network a gradient
+    spike comes from."""
+    sq: Dict[str, jax.Array] = {}
+    for path, x in jax.tree_util.tree_flatten_with_path(tree)[0]:
+        top = str(getattr(path[0], "key", path[0]))
+        m = re.match(r"(.*)_(\d+)$", top)
+        kind = _GROUP.get(m.group(1) if m else top, m.group(1) if m else top)
+        s = jnp.sum(jnp.square(x.astype(jnp.float32)))
+        sq[f"{prefix}_{kind}"] = sq.get(f"{prefix}_{kind}", 0.0) + s
+        if m:
+            sq[f"{prefix}_layer{m.group(2)}"] = sq.get(f"{prefix}_layer{m.group(2)}", 0.0) + s
+    return {k: jnp.sqrt(v) for k, v in sq.items()}
 
 
 def usage_stats(usage: jax.Array) -> Dict[str, jax.Array]:
@@ -393,6 +414,8 @@ class Trainer:
 
         loss = ce
         metrics = {"ce": ce, "acc": acc}
+        if train:  # grows before a softmax/logit blow-up
+            metrics["logit_max"] = jnp.max(jnp.abs(logits))
         if self.mcfg.use_memory:
             div = key_diversity_loss(params["pool"]["sub_keys"])
             loss = loss + self.tcfg.balance_coef * aux["balance_loss"]
@@ -492,7 +515,11 @@ class Trainer:
                 uniq = jnp.where(jnp.any(g_rows != 0, axis=-1), uniq, self.mcfg.pool_size)
 
             # clip by the global norm of both parts together
-            gnorm = jnp.sqrt(optax.tree.norm(g_rest) ** 2 + jnp.sum(g_rows**2))
+            rows_sq = jnp.sum(g_rows**2)
+            gnorm = jnp.sqrt(optax.tree.norm(g_rest) ** 2 + rows_sq)
+            if t.log_grad_groups:
+                metrics.update(group_norms(g_rest, "gn"))
+                metrics["gn_pool_values"] = jnp.sqrt(rows_sq)
             scale = jnp.minimum(1.0, t.grad_clip / (gnorm + 1e-6))
             g_rest = jax.tree_util.tree_map(lambda g: g * scale, g_rest)
             g_rows = g_rows * scale
@@ -504,6 +531,9 @@ class Trainer:
                 updates = jax.tree_util.tree_map_with_path(
                     lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
             rest = optax.apply_updates(rest, updates)
+            # pool values are excluded (only a few rows move per step)
+            metrics["update_norm"] = optax.tree.norm(updates)
+            metrics["param_norm"] = optax.tree.norm(rest)
 
             if values is None:
                 # host pool: the trainer applies lazy Adam on the host
@@ -560,9 +590,14 @@ class Trainer:
                     lambda p, u: u if _is_pool_path(p) else jnp.zeros_like(u), updates)
             params = optax.apply_updates(state.params, updates)
             metrics["grad_norm"] = optax.tree.norm(grads)
+            metrics["update_norm"] = optax.tree.norm(updates)
+            metrics["param_norm"] = optax.tree.norm(params)
+            if t.log_grad_groups:
+                metrics.update(group_norms(grads, "gn"))
         if self.mcfg.use_memory:
             params = project_temperature(params, self.mcfg)
         metrics["noise_scale"] = jnp.asarray(noise, jnp.float32)
+        metrics["lr"] = self.schedule(state.step)
 
         subkey_usage, slot_usage = state.subkey_usage, state.slot_usage
         queries = jnp.zeros((0,))
@@ -702,23 +737,29 @@ def _fmt(metrics: Dict[str, Any]) -> str:
 
 
 # ------------------------------------------------------------- checkpoints
-def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, history, host=None,
-                    data_state=None) -> None:
-    """Resumable checkpoint: full train state + data RNG + eval history
-    (+ a snapshot of a host pool, + the position in a token stream).
-    Written to temp files and renamed, so a crash never leaves a torn file."""
+def _write_checkpoint(path: str, host_state, rng_state, history, data_state=None) -> None:
+    """Write a host copy of the train state: temp files, then renamed, so a
+    crash never leaves a torn file."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if host is not None:
-        host.save(path + ".pool")
     with open(path + ".tmp", "wb") as f:
-        f.write(serialization.to_bytes(jax.device_get(state)))
+        f.write(serialization.to_bytes(host_state))
     with open(path + ".json.tmp", "w") as f:
-        meta = {"step": int(state.step), "np_rng": np_rng.bit_generator.state, "history": history}
+        meta = {"step": int(host_state.step), "np_rng": rng_state, "history": history}
         if data_state is not None:
             meta["data_state"] = data_state
         json.dump(meta, f)
     os.replace(path + ".tmp", path)
     os.replace(path + ".json.tmp", path + ".json")
+
+
+def save_checkpoint(path: str, state: TrainState, np_rng: np.random.Generator, history, host=None,
+                    data_state=None) -> None:
+    """Resumable checkpoint: full train state + data RNG + eval history
+    (+ a snapshot of a host pool, + the position in a token stream)."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if host is not None:
+        host.save(path + ".pool")
+    _write_checkpoint(path, jax.device_get(state), np_rng.bit_generator.state, history, data_state)
 
 
 def load_checkpoint(path: str, template: TrainState, host=None):
@@ -733,11 +774,56 @@ def load_checkpoint(path: str, template: TrainState, host=None):
     return state, np_rng, meta["history"], meta.get("data_state")
 
 
+def flops_per_token(mcfg: ModelConfig, n_backbone: int) -> float:
+    """Training FLOPs per token (forward + backward): 6 per backbone weight
+    (the tied embedding counts as the output layer), attention scores, and
+    the product-key scoring; pool value reads are negligible."""
+    n = n_backbone - mcfg.max_len * mcfg.d_model  # learned positions aren't multiplied
+    attn = 12 * mcfg.n_layers * mcfg.d_model * mcfg.max_len
+    keys = 6 * len(mcfg.memory_layers) * mcfg.pool_heads * mcfg.n_sub_keys * mcfg.d_key if mcfg.use_memory else 0
+    return 6.0 * n + attn + keys
+
+
+_CONSOLE_FIRST = ("loss", "ce", "acc", "grad_norm", "lr")
+
+
+def _console_line(rec: Dict[str, Any], t_run: float) -> str:
+    """Human-readable summary of one metrics record."""
+    head = " ".join(f"{k}={rec[k]:.4g}" for k in _CONSOLE_FIRST if k in rec)
+    perf = f"{rec['step_s'] * 1e3:.0f}ms {rec['tokens_per_s'] / 1e3:.0f}k tok/s"
+    if "mfu" in rec:
+        perf += f" mfu={rec['mfu']:.2f}"
+    parts = [f"step {rec['step']:5d} | {head}", perf]
+    if "data" in rec:
+        d = rec["data"]
+        parts.append(f"data {d['shard']} tokens={d['tokens'] / 1e9:.3f}B wait={d['wait_s']:.0f}s")
+    if "hbm_gb" in rec:
+        parts.append(f"hbm {rec['hbm_gb']:.1f}/{rec.get('hbm_limit_gb', 0):.1f}GB")
+    skip = set(_CONSOLE_FIRST) | {"step", "type", "time", "step_s", "pause_s", "tokens_per_s", "mfu", "tokens", "data",
+                                  "data_s", "nonfinite", "grad_norm_ema", "hbm_gb", "hbm_peak_gb", "hbm_limit_gb",
+                                  "host_rss_gb", "first", "phase", "revived"}
+    rest = {k: v for k, v in rec.items() if k not in skip and not k.startswith("gn_") and isinstance(v, (int, float))}
+    if rest:
+        parts.append(" ".join(f"{k}={v:.4g}" for k, v in rest.items()))
+    if rec.get("revived"):
+        parts.append(f"revived_subkeys={rec['revived']}")
+    return " | ".join(parts) + f" | {time.time() - t_run:.0f}s"
+
+
 def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = None,
-        meta: Dict[str, Any] | None = None, resume: bool = False, stop_after: int | None = None):
+        meta: Dict[str, Any] | None = None, resume: bool = False, stop_after: int | None = None,
+        sample: Dict[str, Any] | None = None):
     """Train. Checkpoints go to <save_path>.state; resume=True continues from
     it exactly (per-step RNGs are derived from the step number).
-    stop_after simulates a preemption (used by tests)."""
+    stop_after simulates a preemption (used by tests).
+
+    Next to <save_path>: .metrics.jsonl (one JSON line per step: every
+    metric, timings, throughput, MFU, data position, memory; plus eval,
+    checkpoint and sample events) and, with sample_every and
+    sample={"tokenizer": path, "prompts": optional file}, .samples.jsonl with
+    text generated on the CPU from the weights of that step."""
+    from .background import AsyncCheckpointer, JsonlLog, SampleLauncher, device_memory, host_rss_gb, peak_flops
+
     mesh = None
     if tcfg.data_parallel and jax.device_count() > 1:
         from jax.sharding import Mesh
@@ -757,21 +843,51 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         with open(save_path + ".config.json", "w") as f:
             json.dump({"model": dataclasses.asdict(mcfg), "train": dataclasses.asdict(tcfg), **(meta or {})}, f)
+    resumed = False
     if resume and ckpt and os.path.exists(ckpt):
         state, np_rng, history, data_state = load_checkpoint(ckpt, state, trainer.host)
         if data_state is not None and hasattr(dataset, "load_state_dict"):
             dataset.load_state_dict(data_state)
         print(f"resumed from {ckpt} at step {int(state.step)}")
+        resumed = True
     state = trainer.place_state(state)
     start = int(state.step) + 1
     streaming = hasattr(dataset, "state_dict")
     if streaming:  # consumed shards are deleted once a checkpoint is past them
         dataset.defer_delete = ckpt is not None
 
-    def checkpoint():
-        save_checkpoint(ckpt, state, np_rng, history, trainer.host, dataset.state_dict() if streaming else None)
-        if streaming:
-            dataset.checkpoint_saved()
+    log = JsonlLog(save_path + ".metrics.jsonl" if save_path else None)
+    checkpointer = AsyncCheckpointer(log)
+    async_ckpt = tcfg.async_checkpoint and trainer.host is None  # a host pool changes in place: save it in step
+    sampler = None
+    if tcfg.sample_every > 0:
+        tok = (sample or {}).get("tokenizer")
+        if not save_path:
+            print("sample_every needs --save: sampling is off")
+        elif not tok or not os.path.exists(tok):
+            print(f"sample_every needs a tokenizer (got {tok!r}): sampling is off")
+        else:
+            sampler = SampleLauncher(save_path, tok, (sample or {}).get("prompts"), tcfg.sample_cpus,
+                                     tcfg.sample_tokens, log)
+
+    def checkpoint(step: int, sync: bool = False):
+        """Save the resumable checkpoint. Returns (host copy of the state or
+        None, seconds training waited)."""
+        data_state = dataset.state_dict() if streaming else None
+        on_done = (lambda: dataset.checkpoint_saved(data_state)) if streaming else None
+        if sync or not async_ckpt:
+            checkpointer.wait()
+            t = time.perf_counter()
+            save_checkpoint(ckpt, state, np_rng, history, trainer.host, data_state)
+            if on_done is not None:
+                on_done()
+            took = time.perf_counter() - t
+            log.write({"type": "checkpoint", "step": step, "path": ckpt, "write_s": took, "sync": True})
+            return None, took
+        rng_state, hist = np_rng.bit_generator.state, list(history)
+        r = checkpointer.save(ckpt, state, lambda hs: _write_checkpoint(ckpt, hs, rng_state, hist, data_state),
+                              step, on_done)
+        return r["host_state"], r["waited_s"] + r["copy_s"]
 
     n_params = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
     n_pool = sum(x.size for x in jax.tree_util.tree_leaves(state.params.get("pool", {})))
@@ -785,67 +901,172 @@ def run(mcfg: ModelConfig, tcfg: TrainConfig, dataset, save_path: str | None = N
               f"{'sparse' if trainer.sparse else 'dense'} pool updates")
     if mesh is not None:
         print(f"data parallel over {jax.device_count()} devices")
+    n_dev = mesh.shape["data"] if mesh is not None else 1
+    fpt = flops_per_token(mcfg, n_params - n_pool)
+    peak = peak_flops(jax.devices()[0])
+    peak = peak * n_dev if peak else None
+    log.write({"type": "start", "step": start - 1, "resumed": resumed, "devices": n_dev,
+               "device_kind": jax.devices()[0].device_kind, "params": n_params, "backbone_params": n_params - n_pool,
+               "pool_params": n_pool, "flops_per_token": fpt, "peak_flops": peak, "pid": os.getpid(),
+               "config": {"model": dataclasses.asdict(mcfg), "train": dataclasses.asdict(tcfg)}})
+    if save_path:
+        print(f"metrics: {save_path}.metrics.jsonl" + (f", samples: {save_path}.samples.jsonl" if sampler else ""))
 
     step_key, revive_key = jax.random.split(base_rng)
     t0 = time.time()
-    for step in range(start, tcfg.steps + 1):
-        batch = trainer.place_batch(dataset.sample(np_rng, tcfg.batch_size))
-        phase = phase_at(tcfg, step)
-        state, metrics, queries = trainer.train_step(
-            state, batch, jax.random.fold_in(step_key, step), **phase)
+    tokens_per_step = 0
+    pending = None  # (step, device metrics, host info) of a dispatched step not yet logged
+    last_logged = start - 1
+    t_last = time.perf_counter()
+    paused = 0.0  # seconds of eval / checkpoint copy / sample copy since the last record
+    gn_ema = None
 
-        revived = 0
-        if (
-            mcfg.use_memory
-            and tcfg.revive_every > 0
-            and step % tcfg.revive_every == 0
-            and step <= tcfg.revive_until * tcfg.steps
-            # revival rewrites sub-keys directly, which would move routing
-            # in a run that must change only the pool values
-            and not tcfg.pool_values_only
-        ):
-            state, revived = trainer.revive(state, queries, jax.random.fold_in(revive_key, step))
-            revived = int(revived)
+    def flush():
+        """Fetch the pending step's metrics (waits for that step only) and
+        write its record. Returns the record."""
+        nonlocal pending, t_last, paused, gn_ema
+        if pending is None:
+            return None
+        step_p, dev_metrics, info = pending
+        pending = None
+        m = {k: float(v) for k, v in jax.device_get(dev_metrics).items() if not k.startswith("_")}
+        now = time.perf_counter()
+        busy = max(now - t_last - paused, 1e-9)
+        rec = {"type": "train", "step": step_p, **m, **info["extra"],
+               "step_s": busy / info["n_steps"], "pause_s": paused,
+               "tokens_per_s": tokens_per_step * info["n_steps"] / busy, "tokens": step_p * tokens_per_step}
+        t_last, paused = now, 0.0
+        if peak:
+            rec["mfu"] = rec["tokens_per_s"] * fpt / peak
+        loss, gn = m.get("loss", 0.0), m.get("grad_norm", 0.0)
+        rec["nonfinite"] = not (math.isfinite(loss) and math.isfinite(gn))
+        if rec["nonfinite"]:
+            print(f"WARNING step {step_p}: non-finite loss={loss} grad_norm={gn}", flush=True)
+        elif "grad_norm" in m:
+            if gn_ema is not None and step_p > tcfg.warmup_steps and gn > 5 * gn_ema:
+                rec["grad_spike"] = gn / gn_ema
+                print(f"WARNING step {step_p}: grad_norm {gn:.3g} is {gn / gn_ema:.1f}x its running mean", flush=True)
+            gn_ema = gn if gn_ema is None else 0.99 * gn_ema + 0.01 * gn
+            rec["grad_norm_ema"] = gn_ema
+        if info.get("full"):
+            rec.update(device_memory())
+            rss = host_rss_gb()
+            if rss is not None:
+                rec["host_rss_gb"] = rss
+        log.write(rec)
+        return rec
 
-        if step % tcfg.log_every == 0 or step == start:
-            msg = f"step {step:5d} | {_fmt(metrics)}"
-            if revived:
-                msg += f" | revived_subkeys={revived}"
-            if streaming:
-                msg += f" | {dataset.progress()}"
-            print(f"{msg} | {time.time() - t0:.0f}s", flush=True)
+    outcome = "finished"
+    try:
+        for step in range(start, tcfg.steps + 1):
+            td = time.perf_counter()
+            batch = trainer.place_batch(dataset.sample(np_rng, tcfg.batch_size))
+            data_s = time.perf_counter() - td
+            tokens_per_step = int(np.prod(batch["inputs"].shape))
+            data_info = dataset.progress_info() if streaming else None
+            phase = phase_at(tcfg, step)
+            state, metrics, queries = trainer.train_step(
+                state, batch, jax.random.fold_in(step_key, step), **phase)
 
-        if step % tcfg.eval_every == 0 or step == tcfg.steps:
-            ev = trainer.evaluate(state.params, dataset, tcfg.batch_size)
-            history.append({"step": step, **ev})
-            print(f"  eval  {step:5d} | {_fmt(ev)}", flush=True)
+            revived = 0
+            if (
+                mcfg.use_memory
+                and tcfg.revive_every > 0
+                and step % tcfg.revive_every == 0
+                and step <= tcfg.revive_until * tcfg.steps
+                # revival rewrites sub-keys directly, which would move routing
+                # in a run that must change only the pool values
+                and not tcfg.pool_values_only
+            ):
+                state, revived = trainer.revive(state, queries, jax.random.fold_in(revive_key, step))
+                revived = int(revived)
 
-        if ckpt and ((tcfg.checkpoint_every and step % tcfg.checkpoint_every == 0)
-                     or step == stop_after):
-            checkpoint()
-        if step == stop_after:
-            print(f"stopping after step {step} (simulated preemption)")
-            return trainer, state, history
+            is_log = step % tcfg.log_every == 0 or step == start or step == tcfg.steps
+            is_eval = step % tcfg.eval_every == 0 or step == tcfg.steps
+            is_ckpt = bool(ckpt) and ((tcfg.checkpoint_every and step % tcfg.checkpoint_every == 0)
+                                      or step == stop_after)
+            is_sample = sampler is not None and step % tcfg.sample_every == 0
+            now_too = is_log or is_eval or is_ckpt or is_sample or step == stop_after
+            flush()  # the previous step's record; the device is busy with this step
+            if now_too or (tcfg.metrics_every > 0 and step % tcfg.metrics_every == 0):
+                extra = {"data_s": data_s, "phase": {k: v for k, v in phase.items() if v} or None}
+                if revived:
+                    extra["revived"] = revived
+                if data_info is not None:
+                    extra["data"] = data_info
+                if step == start:
+                    extra["first"] = True  # includes compilation
+                pending = (step, metrics, {"n_steps": step - last_logged, "extra": extra, "full": is_log})
+                last_logged = step
+            if now_too:
+                rec = flush()
+                if is_log:
+                    print(_console_line(rec, t0), flush=True)
+                    if sampler is not None:
+                        sampler.poll()
 
-    if save_path:
-        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
-        with open(save_path, "wb") as f:
-            f.write(serialization.to_bytes(jax.device_get(state.params)))
-        with open(save_path + ".json", "w") as f:
-            json.dump(
-                {
-                    "model": dataclasses.asdict(mcfg),
-                    "train": dataclasses.asdict(tcfg),
-                    "history": history,
-                    "train_seconds": time.time() - t0,
-                    **(meta or {}),
-                },
-                f,
-                indent=2,
-            )
-        checkpoint()
-        print(f"saved params to {save_path}")
-    return trainer, state, history
+            if is_eval:
+                te = time.perf_counter()
+                ev = trainer.evaluate(state.params, dataset, tcfg.batch_size)
+                eval_s = time.perf_counter() - te
+                paused += eval_s
+                history.append({"step": step, **ev})
+                log.write({"type": "eval", "step": step, **ev, "eval_s": eval_s})
+                print(f"  eval  {step:5d} | {_fmt(ev)} | {eval_s:.1f}s", flush=True)
+
+            host_state = None
+            if is_ckpt:
+                host_state, blocked = checkpoint(step)
+                paused += blocked
+                print(f"  checkpoint {step}: training waited {blocked:.1f}s"
+                      + (", writing in the background" if host_state is not None else ""), flush=True)
+            if is_sample:
+                r = sampler.launch(step, params=state.params,
+                                   host_params=host_state.params if host_state is not None else None)
+                paused += r.get("copy_s", 0.0)
+                if r["skipped"]:
+                    print(f"  sample {step}: skipped, the previous one is still generating", flush=True)
+            if step == stop_after:
+                checkpointer.wait()
+                print(f"stopping after step {step} (simulated preemption)")
+                outcome = "stop_after"
+                return trainer, state, history
+        flush()
+
+        if save_path:
+            checkpointer.wait()
+            os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+            with open(save_path, "wb") as f:
+                f.write(serialization.to_bytes(jax.device_get(state.params)))
+            with open(save_path + ".json", "w") as f:
+                json.dump(
+                    {
+                        "model": dataclasses.asdict(mcfg),
+                        "train": dataclasses.asdict(tcfg),
+                        "history": history,
+                        "train_seconds": time.time() - t0,
+                        **(meta or {}),
+                    },
+                    f,
+                    indent=2,
+                )
+            checkpoint(int(state.step), sync=True)
+            print(f"saved params to {save_path}")
+        return trainer, state, history
+    except BaseException as e:
+        outcome = f"error: {type(e).__name__}: {e}"
+        raise
+    finally:
+        try:
+            checkpointer.wait()  # a checkpoint being written is finished, not torn
+        except Exception as e:
+            print(f"WARNING: background checkpoint failed: {e!r}", flush=True)
+            if outcome == "finished":
+                outcome = f"error: checkpoint: {e!r}"
+        if sampler is not None:
+            sampler.wait_written()
+        log.write({"type": "end", "step": int(state.step), "outcome": outcome, "seconds": time.time() - t0})
+        log.close()
 
 
 # ---------------------------------------------------------------------- CLI
@@ -880,6 +1101,10 @@ def main():
                         help="--task stream: shard directory of experiments.stream_ultrafineweb")
     parser.add_argument("--stream_block_shards", type=int, default=4, help="--task stream: shards shuffled together")
     parser.add_argument("--stream_keep", action="store_true", help="--task stream: don't delete consumed shards")
+    parser.add_argument("--tokenizer", type=str, default=None,
+                        help="tokenizer.json for --sample_every (default: the one next to the token data)")
+    parser.add_argument("--sample_prompts", type=str, default=None,
+                        help="text file with one prompt per line for --sample_every")
     parser.add_argument("--text_path", type=str, default=None)
     parser.add_argument("--num_entities", type=int, default=4096)
     parser.add_argument("--num_relations", type=int, default=4)
@@ -935,7 +1160,12 @@ def main():
     # asked for (--nopool_true_coef 1.0).
     task_defaults = {} if args.task == "facts" else {"nopool_true_coef": 0.0}
     tcfg = _from_args(TrainConfig, args, **task_defaults)
-    run(mcfg, tcfg, dataset, save_path=args.save, meta=meta, resume=args.resume)
+    tokenizer = args.tokenizer
+    if tokenizer is None and args.task in ("tokens", "stream"):
+        near = args.stream_dir if args.task == "stream" else os.path.dirname(args.train_tokens)
+        tokenizer = os.path.join(near, "tokenizer.json")
+    run(mcfg, tcfg, dataset, save_path=args.save, meta=meta, resume=args.resume,
+        sample={"tokenizer": tokenizer, "prompts": args.sample_prompts})
 
 
 if __name__ == "__main__":

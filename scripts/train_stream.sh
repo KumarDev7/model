@@ -7,6 +7,11 @@
 #   scripts/train_stream.sh status     step, loss, data position, waits for data, disk
 #   scripts/train_stream.sh stop       stop training and the tokenizer (keeps the last checkpoint)
 #
+# Logs ($RUN_DIR): logs/train.log (console), model.msgpack.metrics.jsonl (one JSON line per
+# step: every metric, timings, MFU, data position, memory; eval/checkpoint/sample events),
+# model.msgpack.samples.jsonl (text generated on the CPU). Full analysis at any time:
+#   python -m memory_pool_model.metrics_report $RUN_DIR/model.msgpack.metrics.jsonl --plot run.png
+#
 # What it does:
 #   1. tokenizer.json + val.npy in $DATA_DIR (built once by prepare_ultrafineweb; reused after)
 #   2. the stream producer (experiments.stream_ultrafineweb) in the background, restarted if it dies
@@ -24,6 +29,7 @@
 #   STREAM_DIR    token shards; fast local disk, may be lost (default /dev/shm/stream_$RUN_NAME)
 #   TOKENIZER     existing tokenizer.json to reuse when DATA_DIR has none (else a new one is trained)
 #   STEPS BATCH LR WARMUP EVAL_EVERY CKPT_EVERY LOG_EVERY MODEL_FLAGS
+#   SAMPLE_EVERY  generate text on the CPU every N steps (default 5000, 0 = off); SAMPLE_CPUS cores for it
 #   PARTS MAX_READY_GB WORKERS SHARD_TOKENS   (stream producer)
 #   MAX_RESTARTS  training restarts after a crash before giving up (default 5)
 #   PYTHON        python interpreter (default python3)
@@ -80,7 +86,11 @@ LR=${LR:-6e-4}
 WARMUP=${WARMUP:-2000}
 LOG_EVERY=${LOG_EVERY:-250}
 EVAL_EVERY=${EVAL_EVERY:-5000}
-CKPT_EVERY=${CKPT_EVERY:-5000}
+# checkpoints are written in the background; training waits ~1 s for the copy to host memory
+CKPT_EVERY=${CKPT_EVERY:-2000}
+# text from the current weights, generated on the CPU in its own process (training doesn't wait)
+SAMPLE_EVERY=${SAMPLE_EVERY:-5000}
+SAMPLE_CPUS=${SAMPLE_CPUS:-16}
 # the validated 368M model: d768 x 12 backbone, 1M-vector pool read in layers 4 and 8
 MODEL_FLAGS="${MODEL_FLAGS:---d_model 768 --n_layers 12 --n_heads 12 --ffn_mult 4 --max_len 256 --compute_dtype bfloat16 --memory_layers 4,8 --n_sub_keys 1024 --d_key 128 --d_value 256 --memory_ffn true --top_k 8 --pool_sharding false}"
 # Ultra-FineWeb English files in reading order (part 2 is the held-out split)
@@ -164,6 +174,7 @@ train_once() {
         --eval_tokens "$DATA_DIR/val.npy" --vocab_size "$vocab" --eval_windows 256 \
         --steps "$STEPS" --batch_size "$BATCH" --lr "$LR" --warmup_steps "$WARMUP" \
         --log_every "$LOG_EVERY" --eval_every "$EVAL_EVERY" --checkpoint_every "$CKPT_EVERY" \
+        --sample_every "${SAMPLE_EVERY:-0}" --sample_cpus "${SAMPLE_CPUS:-16}" --tokenizer "$DATA_DIR/tokenizer.json" \
         --data_parallel true $MODEL_FLAGS --save "$CKPT" --resume >> "$LOG_DIR/train.log" 2>&1) &
     local pid=$!
     echo $pid > "$RUN_DIR/train.pid"
@@ -235,11 +246,8 @@ status() {
     if alive "$RUN_DIR/train.pid" memory_pool_model.train; then echo "training   running"; else echo "training   not running"; fi
     if alive "$RUN_DIR/stream.pid" stream_ultrafineweb; then echo "producer   running"; else echo "producer   not running"; fi
     echo "checkpoint step $(ckpt_step) of $STEPS"
-    if [ -f "$LOG_DIR/train.log" ]; then
-        local last
-        last=$(grep -E '^step ' "$LOG_DIR/train.log" | tail -n 1 || true)
-        [ -n "$last" ] && echo "last step  $(echo "$last" | grep -oE '^step +[0-9]+') $(echo "$last" | grep -oE ' ce=[^ ]+| grad_norm=[^ ]+' | tr -d '\n') | $(echo "$last" | grep -oE 'data .*s \|' | sed 's/ |$//')"
-        grep -E '^  eval' "$LOG_DIR/train.log" | tail -n 1 | grep -oE 'eval +[0-9]+ \| ce=[^ ]+ acc=[^ ]+' | sed 's/^/last /' || true
+    if [ -f "$CKPT.metrics.jsonl" ]; then
+        (cd "$REPO" && "$PYTHON" -m memory_pool_model.metrics_report "$CKPT.metrics.jsonl" --brief 2>/dev/null) || true
     fi
     if [ -d "$STREAM_DIR" ]; then
         local n

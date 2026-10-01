@@ -87,7 +87,11 @@ def test_consumed_shards_deleted_only_after_checkpoint(tmp_path):
         ds.sample(None, 5)
     assert ds.state_dict()["block"] == ["p0005-0001.npy"]
     assert "p0005-0000.npy" in files()
-    ds.checkpoint_saved()
+    saved = ds.state_dict()  # a checkpoint taken now, written later in the background
+    for _ in range(2):  # reading moves on into block 2 (3 windows left in block 1, then 7)
+        ds.sample(None, 5)
+    assert ds.state_dict()["block"] == ["p0005-0002.npy"]
+    ds.checkpoint_saved(saved)  # deletes only what that checkpoint is past
     assert files() == ["p0005-0001.npy", "p0005-0002.npy", "p0007-0000.npy"]
     nd = make_ds(tmp_path, block_shards=1)  # without checkpoints: deleted as soon as a block is done
     nd.load_state_dict(ds.state_dict())

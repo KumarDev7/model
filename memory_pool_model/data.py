@@ -202,9 +202,14 @@ class StreamingTokenDataset:
         self._st = {k: (list(v) if isinstance(v, list) else v) for k, v in st.items()}
         self._open = None
 
-    def progress(self) -> str:
+    def progress_info(self) -> dict:
+        """Newest shard in use, tokens read so far, seconds waited for the producer."""
         cur = self._st["block"][-1][:-4] if self._st["block"] else "-"
-        return f"data {cur} tokens={self._st['tokens'] / 1e9:.3f}B wait={self.wait_seconds:.0f}s"
+        return {"shard": cur, "tokens": self._st["tokens"], "wait_s": self.wait_seconds}
+
+    def progress(self) -> str:
+        d = self.progress_info()
+        return f"data {d['shard']} tokens={d['tokens'] / 1e9:.3f}B wait={d['wait_s']:.0f}s"
 
     # --------------------------------------------------------------- shards
     def _path(self, name: str) -> str:
@@ -240,17 +245,20 @@ class StreamingTokenDataset:
         part, k = int(m.group(1)), int(m.group(2))
         return (self.parts.index(part) if part in self.parts else -1, k)
 
-    def _delete_before_block(self) -> None:
-        if self.keep or not self._st["block"]:
+    def _delete_before_block(self, st: dict | None = None) -> None:
+        st = st or self._st
+        if self.keep or not st["block"]:
             return
-        first = self._order(self._st["block"][0])
+        first = self._order(st["block"][0])
         for path in glob.glob(self._path("p????-????.npy")):
             if self._order(path) < first:
                 os.remove(path)
 
-    def checkpoint_saved(self) -> None:
-        """The checkpoint is past every block before the current one."""
-        self._delete_before_block()
+    def checkpoint_saved(self, state: dict | None = None) -> None:
+        """A checkpoint saved at `state` (default: now) is written: delete the
+        shards before its block. Safe from a background thread, since reading
+        has moved on from those shards."""
+        self._delete_before_block(state)
 
     def _open_block(self) -> None:
         names = self._st["block"]

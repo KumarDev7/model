@@ -277,6 +277,9 @@ path.
 | `memory_pool_model/host_pool.py` | the pool kept off the GPU: host RAM or memory-mapped files on SSD |
 | `memory_pool_model/generate.py` | token-by-token generation with a KV cache |
 | `memory_pool_model/data.py` | synthetic knowledge-base task, byte-level text, pre-tokenised text, token stream read once (`StreamingTokenDataset`) |
+| `memory_pool_model/background.py` | metrics log, checkpoints written in a background thread, CPU text samples launched while training runs |
+| `memory_pool_model/sample_worker.py` | generates text from a training snapshot on the CPU (pool as trained and pool shuffled) |
+| `memory_pool_model/metrics_report.py` | summary of a run from its metrics log: loss, eval, speed/MFU, pauses, stability, pool health, samples |
 | `memory_pool_model/config.py` | `ModelConfig`, `TrainConfig` (every field is a CLI flag) |
 | `tests/` | correctness tests (exact top-k, collapse, revival, sparse = dense gradients, data parallel, exact resume, host pool, decoding) |
 | `experiments/` | knowledge tests, pool-reliance study, facts-in-text study and its verification (`knowledge_study.py`, `knowledge_verify.py`), scaling and SSD-inference benchmarks |
@@ -445,6 +448,27 @@ python -m memory_pool_model.train --task stream --stream_dir /data/stream \
 ```
 
 If training ever waits for data, the log line says so (`wait=...s`).
+
+**Logs.** With `--save <path>`, training writes `<path>.metrics.jsonl`: one
+JSON line per step (`--metrics_every`) with every metric of that step
+(loss, accuracy, learning rate, gradient norm and its per-module / per-layer
+split `gn_*`, parameter and update norms, max logit, pool usage), step
+time, tokens/s, MFU, time spent paused, data position and waits, device
+memory, plus `eval`, `checkpoint`, `sample_*`, `start` and `end` events.
+Metrics are read one step late, so logging never stalls the device.
+Non-finite steps and gradient spikes (>5x the running mean) are flagged in
+the log and on the console. `python -m memory_pool_model.metrics_report
+<path>.metrics.jsonl [--plot run.png]` summarises a run.
+
+**Checkpoints** are written by a background thread
+(`--async_checkpoint`, default on): training only waits for the copy of
+the state to host memory.
+
+**Samples.** `--sample_every N` generates text from the current weights
+every N steps in a separate low-priority process on the CPU
+(`--sample_cpus` cores; `--sample_prompts` file, else a fixed general set),
+with the pool as trained and with its reads shuffled. Results go to
+`<path>.samples.jsonl`; training doesn't wait for them.
 On a new VM (empty stream directory), add
 `--from_checkpoint /data/ckpt/run.msgpack.state.json` to the producer so it
 skips the parts training has already finished.

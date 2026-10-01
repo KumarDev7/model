@@ -193,6 +193,20 @@ class TrainConfig:
     # Save a resumable checkpoint every N steps (0 = only at the end).
     checkpoint_every: int = 0
 
+    # Checkpoints are written by a background thread; training waits only
+    # for the copy of the state to host memory.
+    async_checkpoint: bool = True
+
     seed: int = 0
-    log_every: int = 100
+    log_every: int = 100  # console line
     eval_every: int = 500
+    # <save>.metrics.jsonl: one JSON line every N steps with every metric of
+    # that step (read one step late, so logging doesn't stall the device)
+    metrics_every: int = 1
+    # gradient norm per module kind and per layer in the metrics (gn_attn, gn_layer3, ...)
+    log_grad_groups: bool = True
+    # Every N steps, generate text from the current weights on the CPU in a
+    # separate process (needs a tokenizer; 0 = off). Training doesn't wait.
+    sample_every: int = 0
+    sample_tokens: int = 48
+    sample_cpus: int = 16  # cores for the sample process (0 = all)
