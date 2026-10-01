@@ -421,6 +421,20 @@ producer can be restarted at any time (or on a new VM) and continues where
 it stopped, with identical shards. One worker tokenises ~1.3-3M tokens/s on
 a v5e-8 host; the d768 x 12 pool model reads 410k/s on 8 chips.
 
+`scripts/train_stream.sh` does all of this in one command that both starts
+and resumes a run: it builds the tokenizer and held-out set once, runs the
+producer in the background (restarting it if it dies), restarts training
+from its last checkpoint after a crash, and keeps the run settings in
+`run.conf` so a resume can't change the learning-rate schedule.
+
+```bash
+nohup scripts/train_stream.sh > /dev/null 2>&1 &   # start, or resume after a stop / crash / new VM
+scripts/train_stream.sh status                     # step, loss, data position, waits, disk
+scripts/train_stream.sh stop
+```
+
+By hand:
+
 ```bash
 # tokenizer.json and val.npy (part 2) come from prepare_ultrafineweb.py
 nohup python -m experiments.stream_ultrafineweb --out /data/stream \
